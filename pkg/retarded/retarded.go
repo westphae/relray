@@ -79,3 +79,12 @@ func Solve(obsPos vec.Vec3, tObs float64, traj Trajectory) (tEmit float64, objPo
 	}
 	return 0, vec.Vec3{}, false
 }
+
+// Velocity computes the velocity of a trajectory at time t via numerical differentiation.
+// Returns velocity in scene units per second (i.e., as a fraction of C).
+func Velocity(traj Trajectory, t float64) vec.Vec3 {
+	const dt = 1e-8
+	p0 := traj(t)
+	p1 := traj(t + dt)
+	return p1.Sub(p0).Scale(1.0 / dt)
+}

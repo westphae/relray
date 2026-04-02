@@ -4,10 +4,11 @@ import "sif/gogs/eric/relray/pkg/vec"
 
 // Hit records a ray-geometry intersection.
 type Hit struct {
-	T         float64  // ray parameter (distance along ray)
-	Point     vec.Vec3 // world-space hit point
-	Normal    vec.Vec3 // outward-facing unit surface normal
-	FrontFace bool     // true if ray hit the front face
+	T              float64  // ray parameter (distance along ray)
+	Point          vec.Vec3 // world-space hit point
+	Normal         vec.Vec3 // outward-facing unit surface normal
+	FrontFace      bool     // true if ray hit the front face
+	SourceVelocity vec.Vec3 // velocity of the surface at hit time (zero for static objects)
 }
 
 // SetFaceNormal sets the normal to always point against the incoming ray.

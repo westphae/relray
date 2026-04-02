@@ -82,5 +82,21 @@ func (tr *Tracer) traceWorld(origin, dir vec.Vec3, depth int) spectrum.SPD {
 		indirect = bounced.Mul(scatter.Reflectance)
 	}
 
-	return emitted.Add(directContrib).Add(indirect)
+	result := emitted.Add(directContrib).Add(indirect)
+
+	// Apply source Doppler shift for moving objects.
+	// The source emits/reflects light while moving, so the photon frequency
+	// is shifted by the source's velocity relative to the photon direction.
+	// D_source = 1 / (gamma * (1 - beta_source · n_photon))
+	// where n_photon = -dir (photon travels from source toward observer).
+	if v := hit.SourceVelocity; v.LengthSq() > 0 {
+		beta := v // velocity as fraction of c (since C=1)
+		nPhoton := dir.Neg().Normalize() // photon propagation: source → observer
+		gamma := 1.0 / math.Sqrt(1.0-beta.LengthSq())
+		dSource := 1.0 / (gamma * (1.0 - beta.Dot(nPhoton)))
+		result = result.Shift(1.0 / dSource)
+		result = result.Scale(dSource * dSource * dSource)
+	}
+
+	return result
 }

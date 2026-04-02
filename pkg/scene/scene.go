@@ -62,17 +62,17 @@ func (s *Scene) Intersect(origin, dir vec.Vec3, tMin, tMax float64) (geometry.Hi
 		// Use the object's current position as a starting point for the retarded-time solve.
 		// The observer "position" for the retarded-time calculation is where the photon
 		// needs to arrive — for a ray, this is the ray origin (the camera or last bounce point).
-		_, objPos, ok := retarded.Solve(origin, s.Time, mo.Trajectory)
+		tEmit, objPos, ok := retarded.Solve(origin, s.Time, mo.Trajectory)
 		if !ok {
 			continue
 		}
 
 		// Intersect ray with shape translated to retarded position
-		// Transform ray into object's local frame (just subtract position)
 		localOrigin := origin.Sub(objPos)
 		if h, ok := mo.Shape.Intersect(localOrigin, dir, tMin, closest); ok {
-			// Transform hit back to world frame
 			h.Point = h.Point.Add(objPos)
+			// Compute source velocity at retarded time (as fraction of c)
+			h.SourceVelocity = retarded.Velocity(mo.Trajectory, tEmit)
 			closestHit = h
 			closestMat = mo.Material
 			closest = h.T
