@@ -76,6 +76,39 @@ func TestMonochromatic(t *testing.T) {
 	}
 }
 
+func TestBlackbodySunlike(t *testing.T) {
+	// 5778K blackbody (solar temperature) should appear roughly white/warm
+	bb := Blackbody(5778, 1.0)
+	_, y, _ := bb.ToXYZ()
+	if math.Abs(y-1.0) > 0.01 {
+		t.Errorf("Blackbody(5778, 1.0) Y = %v, want ~1.0", y)
+	}
+	// Should have nonzero values across the visible spectrum
+	if bb[0] <= 0 || bb[40] <= 0 || bb[80] <= 0 {
+		t.Error("Blackbody should have power across entire visible range")
+	}
+}
+
+func TestBlackbodyHot(t *testing.T) {
+	// 10000K should be bluish (more power at short wavelengths)
+	bb := Blackbody(10000, 1.0)
+	x, _, z := bb.ToXYZ()
+	// High color temperature = high Z relative to X
+	if z <= x {
+		t.Errorf("10000K blackbody should be blue-biased: X=%v Z=%v", x, z)
+	}
+}
+
+func TestBlackbodyCool(t *testing.T) {
+	// 3000K should be reddish (more power at long wavelengths)
+	bb := Blackbody(3000, 1.0)
+	x, _, z := bb.ToXYZ()
+	// Low color temperature = high X relative to Z
+	if x <= z {
+		t.Errorf("3000K blackbody should be red-biased: X=%v Z=%v", x, z)
+	}
+}
+
 func TestFromRGBRed(t *testing.T) {
 	r := FromRGB(1, 0, 0)
 	x, y, z := r.ToXYZ()

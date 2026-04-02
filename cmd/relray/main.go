@@ -132,18 +132,26 @@ func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, be
 }
 
 func buildScene() *scene.Scene {
-	// D65 daylight for the light source
-	d65 := spectrum.D65()
+	// Blackbody light sources
+	sunlight := spectrum.Blackbody(5778, 1.0) // solar temperature, warm white
+	fillLight := spectrum.Blackbody(7500, 1.0) // cooler fill, slightly blue
 
-	// Materials: three colored spheres + gray floor
+	// Sky emission base (blue-tinted blackbody)
+	skyBase := spectrum.Blackbody(12000, 1.0)
+
+	// Materials
 	red := &material.Diffuse{Reflectance: spectrum.FromRGB(0.8, 0.1, 0.1)}
 	green := &material.Diffuse{Reflectance: spectrum.FromRGB(0.1, 0.8, 0.1)}
 	blue := &material.Diffuse{Reflectance: spectrum.FromRGB(0.1, 0.1, 0.8)}
-	floor := &material.Diffuse{Reflectance: spectrum.FromRGB(0.5, 0.5, 0.5)}
+	floor := &material.Checker{
+		Even:  spectrum.FromRGB(0.7, 0.7, 0.7),
+		Odd:   spectrum.FromRGB(0.15, 0.15, 0.15),
+		Scale: 0.5,
+	}
 
 	sc := &scene.Scene{
 		Objects: []scene.Object{
-			// Floor plane at y = -0.5
+			// Checkerboard floor at y = -0.5
 			{Shape: &geometry.Plane{Point: vec.Vec3{Y: -0.5}, Normal: vec.Vec3{Y: 1}}, Material: floor},
 			// Red sphere (left)
 			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -1.2, Y: 0, Z: 1}, Radius: 0.5}, Material: red},
@@ -153,19 +161,18 @@ func buildScene() *scene.Scene {
 			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 1.2, Y: 0, Z: 1}, Radius: 0.5}, Material: blue},
 		},
 		Lights: []scene.Light{
-			// Overhead key light
-			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: d65.Scale(15)},
-			// Fill light from the other side
-			{Position: vec.Vec3{X: -3, Y: 3, Z: -2}, Emission: d65.Scale(8)},
+			// Overhead key light (sunlike)
+			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: sunlight.Scale(15)},
+			// Fill light (cooler)
+			{Position: vec.Vec3{X: -3, Y: 3, Z: -2}, Emission: fillLight.Scale(8)},
 		},
 		Sky: func(dir vec.Vec3) spectrum.SPD {
-			// Gradient sky: blue overhead fading to darker at horizon.
-			// Use D65 * reflectance to create a properly calibrated emission SPD.
+			// Gradient sky using blue-tinted blackbody
 			t := 0.5 * (dir.Y + 1.0)
 			if t < 0 {
 				t = 0
 			}
-			return d65.Mul(spectrum.FromRGB(0.15*t, 0.2*t, 0.4*t))
+			return skyBase.Scale(0.15 * t)
 		},
 	}
 	return sc
