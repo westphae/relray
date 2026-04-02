@@ -1,6 +1,8 @@
 package material
 
 import (
+	"math/rand"
+
 	"sif/gogs/eric/relray/pkg/geometry"
 	"sif/gogs/eric/relray/pkg/spectrum"
 	"sif/gogs/eric/relray/pkg/vec"
@@ -14,7 +16,8 @@ type ScatterResult struct {
 }
 
 // Material determines how a surface interacts with light at each wavelength.
+// The rng parameter is a per-goroutine random source to avoid global lock contention.
 type Material interface {
-	Scatter(inDir vec.Vec3, hit geometry.Hit) ScatterResult
+	Scatter(inDir vec.Vec3, hit geometry.Hit, rng *rand.Rand) ScatterResult
 	Emitted(hit geometry.Hit) spectrum.SPD
 }

@@ -224,6 +224,8 @@ func buildSpheresScene() *scene.Scene {
 	red := &material.Diffuse{Reflectance: spectrum.FromRGB(0.8, 0.1, 0.1)}
 	green := &material.Diffuse{Reflectance: spectrum.FromRGB(0.1, 0.8, 0.1)}
 	blue := &material.Diffuse{Reflectance: spectrum.FromRGB(0.1, 0.1, 0.8)}
+	mirror := &material.Mirror{Reflectance: spectrum.Constant(0.95)}
+	glass := &material.Glass{IOR: 1.5, Tint: spectrum.Constant(1.0)}
 	floor := &material.Checker{
 		Even:  spectrum.FromRGB(0.7, 0.7, 0.7),
 		Odd:   spectrum.FromRGB(0.15, 0.15, 0.15),
@@ -234,9 +236,11 @@ func buildSpheresScene() *scene.Scene {
 		Name: "spheres",
 		Objects: []scene.Object{
 			{Shape: &geometry.Plane{Point: vec.Vec3{Y: -0.5}, Normal: vec.Vec3{Y: 1}}, Material: floor},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -1.2, Y: 0, Z: 1}, Radius: 0.5}, Material: red},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 0, Y: 0, Z: 2}, Radius: 0.5}, Material: green},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 1.2, Y: 0, Z: 1}, Radius: 0.5}, Material: blue},
+			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -1.8, Y: 0, Z: 1.5}, Radius: 0.5}, Material: red},
+			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -0.6, Y: 0, Z: 2}, Radius: 0.5}, Material: green},
+			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 0.6, Y: 0, Z: 2}, Radius: 0.5}, Material: mirror},
+			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 1.8, Y: 0, Z: 1.5}, Radius: 0.5}, Material: glass},
+			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 0, Y: -0.3, Z: 1}, Radius: 0.2}, Material: blue},
 		},
 		Lights: []scene.Light{
 			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: sunlight.Scale(15)},
@@ -260,7 +264,9 @@ func buildRoomScene() *scene.Scene {
 
 	// Room dimensions: 6m wide (X: -3 to 3), 2.5m tall (Y: 0 to 2.5), 8m deep (Z: -2 to 6)
 	wallWhite := &material.Diffuse{Reflectance: spectrum.FromRGB(0.85, 0.82, 0.78)}
-	wallAccent := &material.Diffuse{Reflectance: spectrum.FromRGB(0.6, 0.15, 0.1)} // warm red accent
+	wallAccent := &material.Diffuse{Reflectance: spectrum.FromRGB(0.6, 0.15, 0.1)}
+	glassMat := &material.Glass{IOR: 1.5, Tint: spectrum.Constant(1.0)}
+	mirrorMat := &material.Mirror{Reflectance: spectrum.Constant(0.92)}
 	floorWood := &material.Checker{
 		Even:  spectrum.FromRGB(0.55, 0.35, 0.18), // dark wood
 		Odd:   spectrum.FromRGB(0.65, 0.45, 0.25), // lighter wood
@@ -316,10 +322,20 @@ func buildRoomScene() *scene.Scene {
 				Max: vec.Vec3{X: 2.8, Y: 1.8, Z: 5.8},
 			}, Material: furniture},
 
-			// Decorative sphere on coffee table
+			// Glass globe on coffee table
 			{Shape: &geometry.Sphere{
-				Center: vec.Vec3{X: 0, Y: 0.55, Z: 3.0},
+				Center: vec.Vec3{X: 0.1, Y: 0.55, Z: 3.0},
 				Radius: 0.12,
+			}, Material: glassMat},
+			// Small mirror sphere on coffee table
+			{Shape: &geometry.Sphere{
+				Center: vec.Vec3{X: -0.2, Y: 0.52, Z: 2.8},
+				Radius: 0.08,
+			}, Material: mirrorMat},
+			// Red decorative ball
+			{Shape: &geometry.Sphere{
+				Center: vec.Vec3{X: 0.3, Y: 0.5, Z: 3.2},
+				Radius: 0.08,
 			}, Material: ballMat},
 		},
 

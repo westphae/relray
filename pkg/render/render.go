@@ -3,6 +3,7 @@ package render
 import (
 	"image"
 	"image/color"
+	"math/rand"
 	"runtime"
 	"sync"
 
@@ -61,13 +62,14 @@ func RenderFrame(cfg Config, sc *scene.Scene, cam *camera.Camera) *image.RGBA {
 	close(work)
 
 	var wg sync.WaitGroup
-	for range cfg.NumWorkers {
+	for i := range cfg.NumWorkers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			tracer := &Tracer{Scene: sc, Camera: cam, MaxDepth: cfg.MaxDepth}
+			rng := rand.New(rand.NewSource(int64(i) * 31337))
+			tracer := &Tracer{Scene: sc, Camera: cam, MaxDepth: cfg.MaxDepth, Rng: rng}
 			for t := range work {
-				renderTile(tracer, cfg, t, img)
+				renderTile(tracer, cfg, t, img, rng)
 			}
 		}()
 	}
@@ -75,7 +77,7 @@ func RenderFrame(cfg Config, sc *scene.Scene, cam *camera.Camera) *image.RGBA {
 	return img
 }
 
-func renderTile(tracer *Tracer, cfg Config, t tile, img *image.RGBA) {
+func renderTile(tracer *Tracer, cfg Config, t tile, img *image.RGBA, rng *rand.Rand) {
 	invW := 1.0 / float64(cfg.Width)
 	invH := 1.0 / float64(cfg.Height)
 	invS := 1.0 / float64(cfg.SamplesPerPx)
@@ -83,15 +85,10 @@ func renderTile(tracer *Tracer, cfg Config, t tile, img *image.RGBA) {
 	for y := t.y0; y < t.y1; y++ {
 		for x := t.x0; x < t.x1; x++ {
 			var acc spectrum.SPD
-			for s := range cfg.SamplesPerPx {
-				// Jitter within pixel for antialiasing (centered for single sample)
-				var jx, jy float64
-				if cfg.SamplesPerPx > 1 {
-					jx = (float64(s) + 0.5) / float64(cfg.SamplesPerPx)
-					jy = (float64(s) + 0.5) / float64(cfg.SamplesPerPx)
-				} else {
-					jx, jy = 0.5, 0.5
-				}
+			for range cfg.SamplesPerPx {
+				// Random jitter within pixel for antialiasing
+				jx := rng.Float64()
+				jy := rng.Float64()
 				u := (float64(x) + jx) * invW
 				v := (float64(y) + jy) * invH
 				// Flip v so that y=0 is bottom of image

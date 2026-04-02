@@ -2,6 +2,7 @@ package material
 
 import (
 	"math"
+	"math/rand"
 
 	"sif/gogs/eric/relray/pkg/geometry"
 	"sif/gogs/eric/relray/pkg/spectrum"
@@ -16,8 +17,8 @@ type Checker struct {
 	Scale     float64 // size of each checker square in world units
 }
 
-func (c *Checker) Scatter(inDir vec.Vec3, hit geometry.Hit) ScatterResult {
-	scattered := hit.Normal.Add(randomUnitVec())
+func (c *Checker) Scatter(inDir vec.Vec3, hit geometry.Hit, rng *rand.Rand) ScatterResult {
+	scattered := hit.Normal.Add(RandomUnitVec(rng))
 	if scattered.LengthSq() < 1e-12 {
 		scattered = hit.Normal
 	}

@@ -14,10 +14,8 @@ type Diffuse struct {
 	Reflectance spectrum.SPD
 }
 
-func (d *Diffuse) Scatter(inDir vec.Vec3, hit geometry.Hit) ScatterResult {
-	// Cosine-weighted hemisphere sampling via normal + random unit vector
-	scattered := hit.Normal.Add(randomUnitVec())
-	// Catch degenerate case where random vector cancels normal
+func (d *Diffuse) Scatter(inDir vec.Vec3, hit geometry.Hit, rng *rand.Rand) ScatterResult {
+	scattered := hit.Normal.Add(RandomUnitVec(rng))
 	if scattered.LengthSq() < 1e-12 {
 		scattered = hit.Normal
 	}
@@ -32,12 +30,13 @@ func (d *Diffuse) Emitted(hit geometry.Hit) spectrum.SPD {
 	return spectrum.SPD{}
 }
 
-func randomUnitVec() vec.Vec3 {
+// RandomUnitVec returns a uniformly distributed random unit vector.
+func RandomUnitVec(rng *rand.Rand) vec.Vec3 {
 	for {
 		v := vec.Vec3{
-			X: 2*rand.Float64() - 1,
-			Y: 2*rand.Float64() - 1,
-			Z: 2*rand.Float64() - 1,
+			X: 2*rng.Float64() - 1,
+			Y: 2*rng.Float64() - 1,
+			Z: 2*rng.Float64() - 1,
 		}
 		l2 := v.LengthSq()
 		if l2 > 1e-6 && l2 <= 1 {
