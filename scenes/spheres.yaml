@@ -1,0 +1,52 @@
+name: spheres
+
+camera:
+  position: [0, 0.5, -3]
+  look_at: [0, 0.3, 0]
+  up: [0, 1, 0]
+  vfov: 60
+
+sky:
+  type: gradient
+  top: { blackbody: { temp: 12000, luminance: 0.15 } }
+  bottom: { constant: 0 }
+
+lights:
+  - position: [2, 5, 0]
+    emission: { blackbody: { temp: 5778, luminance: 15 } }
+  - position: [-3, 3, -2]
+    emission: { blackbody: { temp: 7500, luminance: 8 } }
+
+objects:
+  # Checkerboard floor
+  - shape: { plane: { point: [0, -0.5, 0], normal: [0, 1, 0] } }
+    material:
+      checker:
+        even: { rgb: [0.7, 0.7, 0.7] }
+        odd: { rgb: [0.15, 0.15, 0.15] }
+        scale: 0.5
+
+  # Red sphere (left)
+  - shape: { sphere: { center: [-1.8, 0, 1.5], radius: 0.5 } }
+    material:
+      diffuse: { rgb: [0.8, 0.1, 0.1] }
+
+  # Green sphere
+  - shape: { sphere: { center: [-0.6, 0, 2], radius: 0.5 } }
+    material:
+      diffuse: { rgb: [0.1, 0.8, 0.1] }
+
+  # Mirror sphere
+  - shape: { sphere: { center: [0.6, 0, 2], radius: 0.5 } }
+    material:
+      mirror: { constant: 0.95 }
+
+  # Glass sphere
+  - shape: { sphere: { center: [1.8, 0, 1.5], radius: 0.5 } }
+    material:
+      glass: { ior: 1.5, tint: { constant: 1.0 } }
+
+  # Small blue sphere
+  - shape: { sphere: { center: [0, -0.3, 1], radius: 0.2 } }
+    material:
+      diffuse: { rgb: [0.1, 0.1, 0.8] }
