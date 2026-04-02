@@ -16,36 +16,53 @@ import (
 	"sif/gogs/eric/relray/pkg/output"
 	"sif/gogs/eric/relray/pkg/render"
 	"sif/gogs/eric/relray/pkg/scene"
+	"sif/gogs/eric/relray/pkg/scenefile"
 	"sif/gogs/eric/relray/pkg/spectrum"
 	"sif/gogs/eric/relray/pkg/vec"
 )
 
-// addCommonFlags registers flags shared by all subcommands.
-func addCommonFlags(fs *flag.FlagSet) (*int, *int, *int, *int, *string, *string) {
-	width := fs.Int("width", 800, "image width")
-	height := fs.Int("height", 600, "image height")
-	samples := fs.Int("samples", 32, "samples per pixel")
-	depth := fs.Int("depth", 8, "max ray bounces")
-	sceneName := fs.String("scene", "spheres", "scene to render: spheres, room")
-	out := fs.String("out", "", "output filename")
-	return width, height, samples, depth, sceneName, out
+// commonFlags holds the parsed values from flags shared by all subcommands.
+type commonFlags struct {
+	width, height, samples, depth int
+	sceneName, file, out          string
 }
 
-func buildConfig(width, height, samples, depth int) render.Config {
+func addCommonFlags(fs *flag.FlagSet) *commonFlags {
+	cf := &commonFlags{}
+	fs.IntVar(&cf.width, "width", 800, "image width")
+	fs.IntVar(&cf.height, "height", 600, "image height")
+	fs.IntVar(&cf.samples, "samples", 32, "samples per pixel")
+	fs.IntVar(&cf.depth, "depth", 8, "max ray bounces")
+	fs.StringVar(&cf.sceneName, "scene", "spheres", "built-in scene: spheres, room")
+	fs.StringVar(&cf.file, "file", "", "load scene from YAML file (overrides --scene)")
+	fs.StringVar(&cf.out, "out", "", "output filename")
+	return cf
+}
+
+func (cf *commonFlags) config() render.Config {
 	return render.Config{
-		Width:        width,
-		Height:       height,
-		MaxDepth:     depth,
-		SamplesPerPx: samples,
+		Width:        cf.width,
+		Height:       cf.height,
+		MaxDepth:     cf.depth,
+		SamplesPerPx: cf.samples,
 	}
 }
 
-func buildScene(name string) *scene.Scene {
-	switch name {
+// loadScene loads from --file if provided, otherwise uses the built-in --scene.
+// Returns the scene and an optional camera (nil if not specified in file).
+func (cf *commonFlags) loadScene() (*scene.Scene, *camera.Camera) {
+	if cf.file != "" {
+		sc, cam, err := scenefile.Load(cf.file)
+		if err != nil {
+			log.Fatalf("loading scene file: %v", err)
+		}
+		return sc, cam
+	}
+	switch cf.sceneName {
 	case "room":
-		return buildRoomScene()
+		return buildRoomScene(), nil
 	default:
-		return buildSpheresScene()
+		return buildSpheresScene(), nil
 	}
 }
 
@@ -65,44 +82,45 @@ func main() {
 	switch subcmd {
 	case "render":
 		fs := flag.NewFlagSet("render", flag.ExitOnError)
-		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		cf := addCommonFlags(fs)
 		beta := fs.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
 		fs.Parse(os.Args[2:])
 
-		sc := buildScene(*sceneName)
-		if *out == "" {
-			*out = "output.png"
+		sc, fileCam := cf.loadScene()
+		if cf.out == "" {
+			cf.out = "output.png"
 		}
-		runSingle(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *beta, *out)
+		_ = fileCam // render uses cameraPreset or file camera via beta flag
+		runSingle(cf.config(), sc, cf.width, cf.height, *beta, cf.out)
 
 	case "sweep":
 		fs := flag.NewFlagSet("sweep", flag.ExitOnError)
-		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		cf := addCommonFlags(fs)
 		betaMin := fs.Float64("beta-min", -0.5, "starting beta")
 		betaMax := fs.Float64("beta-max", 0.5, "ending beta")
 		betaStep := fs.Float64("beta-step", 0.001, "beta increment per frame")
 		fps := fs.Int("fps", 30, "video framerate")
 		fs.Parse(os.Args[2:])
 
-		sc := buildScene(*sceneName)
-		if *out == "" {
-			*out = "sweep.mp4"
+		sc, _ := cf.loadScene()
+		if cf.out == "" {
+			cf.out = "sweep.mp4"
 		}
-		runSweep(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *betaMin, *betaMax, *betaStep, *fps, *out)
+		runSweep(cf.config(), sc, cf.width, cf.height, *betaMin, *betaMax, *betaStep, *fps, cf.out)
 
 	case "walk":
 		fs := flag.NewFlagSet("walk", flag.ExitOnError)
-		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		cf := addCommonFlags(fs)
 		duration := fs.Float64("duration", 10.0, "walk duration in seconds")
 		speed := fs.Float64("speed", 0.5, "observer speed as fraction of c")
 		fps := fs.Int("fps", 30, "video framerate")
 		fs.Parse(os.Args[2:])
 
-		sc := buildScene(*sceneName)
-		if *out == "" {
-			*out = "walk.mp4"
+		sc, _ := cf.loadScene()
+		if cf.out == "" {
+			cf.out = "walk.mp4"
 		}
-		runWalk(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *duration, *speed, *fps, *out)
+		runWalk(cf.config(), sc, cf.width, cf.height, *duration, *speed, *fps, cf.out)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", subcmd)
