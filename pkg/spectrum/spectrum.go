@@ -159,57 +159,75 @@ func Monochromatic(lambda float64, power float64) SPD {
 	return s
 }
 
-// FromRGB creates an SPD from linear sRGB values using a CIE basis function approach.
-// Converts RGB→XYZ, then finds SPD = a·x̄ + b·ȳ + c·z̄ that produces the target XYZ,
-// with negative values clamped to zero.
+// FromRGB creates a reflectance SPD from linear sRGB values.
+//
+// Uses three Gaussian basis reflectances calibrated so that under D65 illumination,
+// the round-trip through CIE XYZ → sRGB reproduces the input colors correctly.
 func FromRGB(r, g, b float64) SPD {
-	// sRGB to XYZ (D65 reference white)
+	// Target XYZ under D65 illumination
 	tx := 0.4124564*r + 0.3575761*g + 0.1804375*b
 	ty := 0.2126729*r + 0.7151522*g + 0.0721750*b
 	tz := 0.0193339*r + 0.1191920*g + 0.9503041*b
 
-	// Solve for coefficients [a,b,c] such that:
-	//   ∫(a·x̄ + b·ȳ + c·z̄)·x̄ dλ = tx  (and similarly for ty, tz)
-	// This requires M·[a,b,c]^T = [tx,ty,tz]^T where M is the Gram matrix.
-	a, bb2, cc := solveGram(tx, ty, tz)
+	// Solve for coefficients: c = basisXYZInv * [tx, ty, tz]
+	cr := basisXYZInv[0][0]*tx + basisXYZInv[0][1]*ty + basisXYZInv[0][2]*tz
+	cg := basisXYZInv[1][0]*tx + basisXYZInv[1][1]*ty + basisXYZInv[1][2]*tz
+	cb := basisXYZInv[2][0]*tx + basisXYZInv[2][1]*ty + basisXYZInv[2][2]*tz
 
 	var s SPD
 	for i := range s {
-		v := a*cieX[i] + bb2*cieY[i] + cc*cieZ[i]
+		v := cr*basisR[i] + cg*basisG[i] + cb*basisB[i]
 		if v < 0 {
-			v = 0 // clamp negatives for physical plausibility
+			v = 0
 		}
 		s[i] = v
 	}
 	return s
 }
 
-// gramInv is the precomputed inverse of the Gram matrix M_ij = Σ f_i[k]*f_j[k] * step
-// where f_0=x̄, f_1=ȳ, f_2=z̄. Computed once at init.
-var gramInv [3][3]float64
+// Gaussian basis reflectances and their precomputed XYZ under D65.
+var (
+	basisR     SPD
+	basisG     SPD
+	basisB     SPD
+	basisXYZInv [3][3]float64
+)
 
 func init() {
-	// Compute Gram matrix
-	var m [3][3]float64
-	cmf := [3]*[NumBands]float64{&cieX, &cieY, &cieZ}
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			var sum float64
-			for k := 0; k < NumBands; k++ {
-				sum += cmf[i][k] * cmf[j][k]
-			}
-			m[i][j] = sum * LambdaStep
+	// Build Gaussian basis reflectances
+	for i := range basisR {
+		lambda := Wavelength(i)
+		basisR[i] = math.Exp(-0.5 * math.Pow((lambda-600)/40, 2))
+		basisG[i] = math.Exp(-0.5 * math.Pow((lambda-540)/35, 2))
+		basisB[i] = math.Exp(-0.5 * math.Pow((lambda-450)/30, 2))
+	}
+
+	// Compute XYZ of each basis under D65 illumination:
+	//   XYZ_i = ∫ D65(λ) * basis_i(λ) * [x̄,ȳ,z̄](λ) dλ
+	d65 := D65()
+	var m [3][3]float64 // m[basis][xyz_component]
+	bases := [3]*SPD{&basisR, &basisG, &basisB}
+	for bi, basis := range bases {
+		for k := 0; k < NumBands; k++ {
+			lit := d65[k] * basis[k]
+			m[bi][0] += lit * cieX[k] * LambdaStep
+			m[bi][1] += lit * cieY[k] * LambdaStep
+			m[bi][2] += lit * cieZ[k] * LambdaStep
 		}
 	}
-	// Invert 3x3 matrix
-	gramInv = invert3x3(m)
-}
 
-func solveGram(tx, ty, tz float64) (a, b, c float64) {
-	a = gramInv[0][0]*tx + gramInv[0][1]*ty + gramInv[0][2]*tz
-	b = gramInv[1][0]*tx + gramInv[1][1]*ty + gramInv[1][2]*tz
-	c = gramInv[2][0]*tx + gramInv[2][1]*ty + gramInv[2][2]*tz
-	return
+	// We need the matrix that maps [cr, cg, cb] -> [X, Y, Z]:
+	//   [X]   [m[0][0] m[1][0] m[2][0]] [cr]
+	//   [Y] = [m[0][1] m[1][1] m[2][1]] [cg]
+	//   [Z]   [m[0][2] m[1][2] m[2][2]] [cb]
+	// So the forward matrix has basis XYZ as columns.
+	var fwd [3][3]float64
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			fwd[i][j] = m[j][i] // transpose: column j = basis j's XYZ
+		}
+	}
+	basisXYZInv = invert3x3(fwd)
 }
 
 func invert3x3(m [3][3]float64) [3][3]float64 {

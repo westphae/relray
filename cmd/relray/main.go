@@ -79,17 +79,18 @@ func buildScene() *scene.Scene {
 		},
 		Lights: []scene.Light{
 			// Overhead key light
-			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: d65.Scale(3000)},
+			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: d65.Scale(15)},
 			// Fill light from the other side
-			{Position: vec.Vec3{X: -3, Y: 3, Z: -2}, Emission: d65.Scale(1500)},
+			{Position: vec.Vec3{X: -3, Y: 3, Z: -2}, Emission: d65.Scale(8)},
 		},
 		Sky: func(dir vec.Vec3) spectrum.SPD {
-			// Gradient sky: blue overhead fading to darker at horizon
+			// Gradient sky: blue overhead fading to darker at horizon.
+			// Use D65 * reflectance to create a properly calibrated emission SPD.
 			t := 0.5 * (dir.Y + 1.0)
 			if t < 0 {
 				t = 0
 			}
-			return spectrum.FromRGB(0.4*t, 0.5*t, 0.9*t)
+			return d65.Mul(spectrum.FromRGB(0.15*t, 0.2*t, 0.4*t))
 		},
 	}
 	return sc
