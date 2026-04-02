@@ -339,17 +339,30 @@ func buildRoomScene() *scene.Scene {
 			}, Material: ballMat},
 		},
 
-		// Moving object: a ball rolling across the floor
+		// Orbiting globe above the coffee table, suspended from ceiling.
+		// Completes one orbit per walk duration (10s default).
+		// Orbit radius 0.4m gives speed ≈ 2π·0.4/10 ≈ 0.25c — enough for visible effects.
 		MovingObjects: []scene.MovingObject{
 			{
-				Shape:    &geometry.Sphere{Radius: 0.15},
-				Material: &material.Diffuse{Reflectance: spectrum.FromRGB(0.2, 0.8, 0.2)},
+				Shape:    &geometry.Sphere{Radius: 0.12},
+				Material: &material.CheckerSphere{
+					Even:       spectrum.FromRGB(0.9, 0.85, 0.15),
+					Odd:        spectrum.FromRGB(0.1, 0.1, 0.6),
+					NumSquares: 8,
+				},
 				Trajectory: func(t float64) vec.Vec3 {
-					// Rolling along X from left to right, at Z=2
+					const (
+						orbitRadius = 0.4
+						orbitPeriod = 10.0
+						centerX     = 0.0
+						centerZ     = 3.0
+						height      = 1.2 // hanging below ceiling
+					)
+					angle := 2 * math.Pi * t / orbitPeriod
 					return vec.Vec3{
-						X: -2.0 + 0.3*t, // 0.3 m/s along X (0.3c!)
-						Y: 0.15,
-						Z: 2.0,
+						X: centerX + orbitRadius*math.Cos(angle),
+						Y: height,
+						Z: centerZ + orbitRadius*math.Sin(angle),
 					}
 				},
 			},
