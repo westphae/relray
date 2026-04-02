@@ -4,6 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"sif/gogs/eric/relray/pkg/camera"
@@ -22,19 +25,16 @@ func main() {
 	beta := flag.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
 	samples := flag.Int("samples", 4, "samples per pixel")
 	depth := flag.Int("depth", 4, "max ray bounces")
-	outFile := flag.String("out", "output.png", "output filename")
+	outFile := flag.String("out", "", "output filename (default: output.png or sweep.mp4)")
+
+	sweep := flag.Bool("sweep", false, "render beta sweep video")
+	betaMin := flag.Float64("beta-min", -0.5, "sweep: starting beta")
+	betaMax := flag.Float64("beta-max", 0.5, "sweep: ending beta")
+	betaStep := flag.Float64("beta-step", 0.001, "sweep: beta increment per frame")
+	fps := flag.Int("fps", 30, "sweep: video framerate")
 	flag.Parse()
 
 	sc := buildScene()
-	cam := &camera.Camera{
-		Position: vec.Vec3{X: 0, Y: 0.5, Z: -3},
-		LookAt:   vec.Vec3{X: 0, Y: 0.3, Z: 0},
-		Up:       vec.Vec3{Y: 1},
-		VFOV:     60,
-		Aspect:   float64(*width) / float64(*height),
-		Beta:     vec.Vec3{Z: *beta},
-	}
-
 	cfg := render.Config{
 		Width:        *width,
 		Height:       *height,
@@ -42,18 +42,93 @@ func main() {
 		SamplesPerPx: *samples,
 	}
 
-	fmt.Printf("Rendering %dx%d, beta=%.2f, %d spp, %d bounces\n",
-		cfg.Width, cfg.Height, *beta, cfg.SamplesPerPx, cfg.MaxDepth)
+	if *sweep {
+		runSweep(cfg, sc, *width, *height, *betaMin, *betaMax, *betaStep, *fps, *outFile)
+	} else {
+		runSingle(cfg, sc, *width, *height, *beta, *outFile)
+	}
+}
+
+func runSingle(cfg render.Config, sc *scene.Scene, width, height int, beta float64, outFile string) {
+	if outFile == "" {
+		outFile = "output.png"
+	}
+	cam := &camera.Camera{
+		Position: vec.Vec3{X: 0, Y: 0.5, Z: -3},
+		LookAt:   vec.Vec3{X: 0, Y: 0.3, Z: 0},
+		Up:       vec.Vec3{Y: 1},
+		VFOV:     60,
+		Aspect:   float64(width) / float64(height),
+		Beta:     vec.Vec3{Z: beta},
+	}
+
+	fmt.Printf("Rendering %dx%d, beta=%.3f, %d spp, %d bounces\n",
+		cfg.Width, cfg.Height, beta, cfg.SamplesPerPx, cfg.MaxDepth)
 
 	start := time.Now()
 	img := render.RenderFrame(cfg, sc, cam)
-	elapsed := time.Since(start)
-	fmt.Printf("Rendered in %v\n", elapsed)
+	fmt.Printf("Rendered in %v\n", time.Since(start))
 
-	if err := output.SavePNG(*outFile, img); err != nil {
+	if err := output.SavePNG(outFile, img); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Saved to %s\n", *outFile)
+	fmt.Printf("Saved to %s\n", outFile)
+}
+
+func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, betaMax, betaStep float64, fps int, outFile string) {
+	if outFile == "" {
+		outFile = "sweep.mp4"
+	}
+
+	// Count frames
+	numFrames := int(math.Round((betaMax-betaMin)/betaStep)) + 1
+	fmt.Printf("Beta sweep: %.3f to %.3f, step %.4f (%d frames)\n", betaMin, betaMax, betaStep, numFrames)
+	fmt.Printf("Rendering %dx%d, %d spp, %d bounces, %d fps\n",
+		cfg.Width, cfg.Height, cfg.SamplesPerPx, cfg.MaxDepth, fps)
+
+	// Create temp directory for frames
+	frameDir, err := os.MkdirTemp("", "relray-sweep-*")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(frameDir)
+
+	totalStart := time.Now()
+	for i := range numFrames {
+		b := betaMin + float64(i)*betaStep
+		if b > betaMax {
+			b = betaMax
+		}
+
+		cam := &camera.Camera{
+			Position: vec.Vec3{X: 0, Y: 0.5, Z: -3},
+			LookAt:   vec.Vec3{X: 0, Y: 0.3, Z: 0},
+			Up:       vec.Vec3{Y: 1},
+			VFOV:     60,
+			Aspect:   float64(width) / float64(height),
+			Beta:     vec.Vec3{Z: b},
+		}
+
+		start := time.Now()
+		img := render.RenderFrame(cfg, sc, cam)
+		elapsed := time.Since(start)
+
+		framePath := filepath.Join(frameDir, fmt.Sprintf("frame_%04d.png", i))
+		if err := output.SavePNG(framePath, img); err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("Frame %d/%d  beta=%+.3f  %v\n", i+1, numFrames, b, elapsed)
+	}
+
+	fmt.Printf("All frames rendered in %v\n", time.Since(totalStart))
+	fmt.Printf("Assembling video...\n")
+
+	pattern := filepath.Join(frameDir, "frame_%04d.png")
+	if err := output.AssembleVideo(pattern, fps, outFile); err != nil {
+		log.Fatalf("ffmpeg failed: %v", err)
+	}
+	fmt.Printf("Saved to %s\n", outFile)
 }
 
 func buildScene() *scene.Scene {
