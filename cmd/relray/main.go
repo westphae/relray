@@ -1,13 +1,14 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	"sif/gogs/eric/relray/pkg/camera"
 	"sif/gogs/eric/relray/pkg/geometry"
@@ -19,48 +20,107 @@ import (
 	"sif/gogs/eric/relray/pkg/vec"
 )
 
-func main() {
-	width := flag.Int("width", 800, "image width")
-	height := flag.Int("height", 600, "image height")
-	beta := flag.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
-	samples := flag.Int("samples", 4, "samples per pixel")
-	depth := flag.Int("depth", 4, "max ray bounces")
-	outFile := flag.String("out", "", "output filename (default: output.png or sweep.mp4)")
-	sceneFlag := flag.String("scene", "spheres", "scene to render: spheres, room")
+// addCommonFlags registers flags shared by all subcommands.
+func addCommonFlags(fs *flag.FlagSet) (*int, *int, *int, *int, *string, *string) {
+	width := fs.Int("width", 800, "image width")
+	height := fs.Int("height", 600, "image height")
+	samples := fs.Int("samples", 32, "samples per pixel")
+	depth := fs.Int("depth", 8, "max ray bounces")
+	sceneName := fs.String("scene", "spheres", "scene to render: spheres, room")
+	out := fs.String("out", "", "output filename")
+	return width, height, samples, depth, sceneName, out
+}
 
-	sweep := flag.Bool("sweep", false, "render beta sweep video")
-	betaMin := flag.Float64("beta-min", -0.5, "sweep: starting beta")
-	betaMax := flag.Float64("beta-max", 0.5, "sweep: ending beta")
-	betaStep := flag.Float64("beta-step", 0.001, "sweep: beta increment per frame")
-	fps := flag.Int("fps", 30, "sweep/walk: video framerate")
+func buildConfig(width, height, samples, depth int) render.Config {
+	return render.Config{
+		Width:        width,
+		Height:       height,
+		MaxDepth:     depth,
+		SamplesPerPx: samples,
+	}
+}
 
-	walk := flag.Bool("walk", false, "render walk-through video of the room scene")
-	walkDuration := flag.Float64("walk-duration", 10.0, "walk: duration in seconds")
-	walkSpeed := flag.Float64("walk-speed", 0.5, "walk: observer speed in scene units/s (fraction of c)")
-	flag.Parse()
-
-	var sc *scene.Scene
-	switch *sceneFlag {
+func buildScene(name string) *scene.Scene {
+	switch name {
 	case "room":
-		sc = buildRoomScene()
+		return buildRoomScene()
 	default:
-		sc = buildSpheresScene()
+		return buildSpheresScene()
+	}
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
 	}
 
-	cfg := render.Config{
-		Width:        *width,
-		Height:       *height,
-		MaxDepth:     *depth,
-		SamplesPerPx: *samples,
+	subcmd := os.Args[1]
+	// If the first arg looks like a flag, treat it as "render"
+	if len(subcmd) > 0 && subcmd[0] == '-' {
+		subcmd = "render"
+		os.Args = append([]string{os.Args[0], "render"}, os.Args[1:]...)
 	}
 
-	if *walk {
-		runWalk(cfg, sc, *width, *height, *walkDuration, *walkSpeed, *fps, *outFile)
-	} else if *sweep {
-		runSweep(cfg, sc, *width, *height, *betaMin, *betaMax, *betaStep, *fps, *outFile)
-	} else {
-		runSingle(cfg, sc, *width, *height, *beta, *outFile)
+	switch subcmd {
+	case "render":
+		fs := flag.NewFlagSet("render", flag.ExitOnError)
+		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		beta := fs.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
+		fs.Parse(os.Args[2:])
+
+		sc := buildScene(*sceneName)
+		if *out == "" {
+			*out = "output.png"
+		}
+		runSingle(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *beta, *out)
+
+	case "sweep":
+		fs := flag.NewFlagSet("sweep", flag.ExitOnError)
+		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		betaMin := fs.Float64("beta-min", -0.5, "starting beta")
+		betaMax := fs.Float64("beta-max", 0.5, "ending beta")
+		betaStep := fs.Float64("beta-step", 0.001, "beta increment per frame")
+		fps := fs.Int("fps", 30, "video framerate")
+		fs.Parse(os.Args[2:])
+
+		sc := buildScene(*sceneName)
+		if *out == "" {
+			*out = "sweep.mp4"
+		}
+		runSweep(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *betaMin, *betaMax, *betaStep, *fps, *out)
+
+	case "walk":
+		fs := flag.NewFlagSet("walk", flag.ExitOnError)
+		width, height, samples, depth, sceneName, out := addCommonFlags(fs)
+		duration := fs.Float64("duration", 10.0, "walk duration in seconds")
+		speed := fs.Float64("speed", 0.5, "observer speed as fraction of c")
+		fps := fs.Int("fps", 30, "video framerate")
+		fs.Parse(os.Args[2:])
+
+		sc := buildScene(*sceneName)
+		if *out == "" {
+			*out = "walk.mp4"
+		}
+		runWalk(buildConfig(*width, *height, *samples, *depth), sc, *width, *height, *duration, *speed, *fps, *out)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", subcmd)
+		printUsage()
+		os.Exit(1)
 	}
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `Usage: relray <command> [flags]
+
+Commands:
+  render    Render a single static image
+  sweep     Render a beta sweep video
+  walk      Render a walk-through video
+
+Run 'relray <command> --help' for command-specific flags.
+`)
 }
 
 // CameraPreset returns a default camera for the given scene name.
