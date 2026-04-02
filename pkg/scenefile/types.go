@@ -48,11 +48,21 @@ type MovingObjSpec struct {
 }
 
 // ShapeSpec is a tagged union for shapes.
-// Exactly one field should be set.
+// Exactly one shape field should be set.
+// Position and Rotation are optional transforms applied to any shape.
 type ShapeSpec struct {
-	Sphere *SphereSpec `yaml:"sphere,omitempty"`
-	Plane  *PlaneSpec  `yaml:"plane,omitempty"`
-	Box    *BoxSpec    `yaml:"box,omitempty"`
+	Sphere   *SphereSpec   `yaml:"sphere,omitempty"`
+	Plane    *PlaneSpec    `yaml:"plane,omitempty"`
+	Box      *BoxSpec      `yaml:"box,omitempty"`
+	Cylinder *CylinderSpec `yaml:"cylinder,omitempty"`
+	Cone     *ConeSpec     `yaml:"cone,omitempty"`
+	Disk     *DiskSpec     `yaml:"disk,omitempty"`
+	Triangle *TriangleSpec `yaml:"triangle,omitempty"`
+	Pyramid  *PyramidSpec  `yaml:"pyramid,omitempty"`
+
+	// Optional transform (applied to any shape)
+	Position *[3]float64 `yaml:"position,omitempty"` // translation
+	Rotation *[3]float64 `yaml:"rotation,omitempty"` // euler angles in degrees: yaw, pitch, roll
 }
 
 type SphereSpec struct {
@@ -68,6 +78,34 @@ type PlaneSpec struct {
 type BoxSpec struct {
 	Min [3]float64 `yaml:"min"`
 	Max [3]float64 `yaml:"max"`
+}
+
+type CylinderSpec struct {
+	Radius float64 `yaml:"radius"`
+	Height float64 `yaml:"height"`
+}
+
+type ConeSpec struct {
+	Radius float64 `yaml:"radius"`
+	Height float64 `yaml:"height"`
+}
+
+type DiskSpec struct {
+	Center [3]float64 `yaml:"center"`
+	Normal [3]float64 `yaml:"normal"`
+	Radius float64    `yaml:"radius"`
+}
+
+type TriangleSpec struct {
+	V0 [3]float64 `yaml:"v0"`
+	V1 [3]float64 `yaml:"v1"`
+	V2 [3]float64 `yaml:"v2"`
+}
+
+type PyramidSpec struct {
+	BaseRadius float64 `yaml:"base_radius"`
+	Height     float64 `yaml:"height"`
+	Sides      int     `yaml:"sides"`
 }
 
 // MaterialSpec is a tagged union for materials.

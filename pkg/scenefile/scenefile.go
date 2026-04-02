@@ -130,16 +130,47 @@ func convertSPD(s *SPDSpec) (spectrum.SPD, error) {
 // --- Shapes ---
 
 func convertShape(s *ShapeSpec) (geometry.Shape, error) {
+	var shape geometry.Shape
+	var err error
+
 	switch {
 	case s.Sphere != nil:
-		return &geometry.Sphere{Center: v3(s.Sphere.Center), Radius: s.Sphere.Radius}, nil
+		shape = &geometry.Sphere{Center: v3(s.Sphere.Center), Radius: s.Sphere.Radius}
 	case s.Plane != nil:
-		return &geometry.Plane{Point: v3(s.Plane.Point), Normal: v3(s.Plane.Normal).Normalize()}, nil
+		shape = &geometry.Plane{Point: v3(s.Plane.Point), Normal: v3(s.Plane.Normal).Normalize()}
 	case s.Box != nil:
-		return &geometry.Box{Min: v3(s.Box.Min), Max: v3(s.Box.Max)}, nil
+		shape = &geometry.Box{Min: v3(s.Box.Min), Max: v3(s.Box.Max)}
+	case s.Cylinder != nil:
+		shape = &geometry.Cylinder{Radius: s.Cylinder.Radius, Height: s.Cylinder.Height}
+	case s.Cone != nil:
+		shape = &geometry.Cone{Radius: s.Cone.Radius, Height: s.Cone.Height}
+	case s.Disk != nil:
+		shape = &geometry.Disk{Center: v3(s.Disk.Center), Normal: v3(s.Disk.Normal).Normalize(), Radius: s.Disk.Radius}
+	case s.Triangle != nil:
+		shape = &geometry.Triangle{V0: v3(s.Triangle.V0), V1: v3(s.Triangle.V1), V2: v3(s.Triangle.V2)}
+	case s.Pyramid != nil:
+		shape = &geometry.Pyramid{BaseRadius: s.Pyramid.BaseRadius, Height: s.Pyramid.Height, Sides: s.Pyramid.Sides}
 	default:
-		return nil, fmt.Errorf("no shape type specified (use sphere, plane, or box)")
+		err = fmt.Errorf("no shape type specified (use sphere, plane, box, cylinder, cone, disk, triangle, or pyramid)")
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply optional transform
+	if s.Position != nil || s.Rotation != nil {
+		pos := vec.Vec3{}
+		rot := vec.Identity()
+		if s.Position != nil {
+			pos = v3(*s.Position)
+		}
+		if s.Rotation != nil {
+			rot = vec.RotationFromEulerDeg(s.Rotation[0], s.Rotation[1], s.Rotation[2])
+		}
+		shape = geometry.NewTransformed(shape, pos, rot)
+	}
+
+	return shape, nil
 }
 
 // --- Materials ---
