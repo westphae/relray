@@ -69,10 +69,17 @@ func (cf *commonFlags) loadScene() (*scene.Scene, *camera.Camera) {
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	subcmd := os.Args[1]
+
+	// Top-level help
+	if subcmd == "-h" || subcmd == "--help" || subcmd == "help" {
+		printUsage()
+		os.Exit(0)
+	}
+
 	// If the first arg looks like a flag, treat it as "render"
 	if len(subcmd) > 0 && subcmd[0] == '-' {
 		subcmd = "render"
@@ -84,13 +91,17 @@ func main() {
 		fs := flag.NewFlagSet("render", flag.ExitOnError)
 		cf := addCommonFlags(fs)
 		beta := fs.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
+		fs.Usage = func() {
+			fmt.Fprintf(os.Stderr, "Usage: relray render [flags]\n\nRender a single static image.\n\nFlags:\n")
+			fs.PrintDefaults()
+		}
 		fs.Parse(os.Args[2:])
 
 		sc, fileCam := cf.loadScene()
 		if cf.out == "" {
 			cf.out = "output.png"
 		}
-		_ = fileCam // render uses cameraPreset or file camera via beta flag
+		_ = fileCam
 		runSingle(cf.config(), sc, cf.width, cf.height, *beta, cf.out)
 
 	case "sweep":
@@ -100,6 +111,10 @@ func main() {
 		betaMax := fs.Float64("beta-max", 0.5, "ending beta")
 		betaStep := fs.Float64("beta-step", 0.001, "beta increment per frame")
 		fps := fs.Int("fps", 30, "video framerate")
+		fs.Usage = func() {
+			fmt.Fprintf(os.Stderr, "Usage: relray sweep [flags]\n\nRender a beta sweep video across a range of velocities.\n\nFlags:\n")
+			fs.PrintDefaults()
+		}
 		fs.Parse(os.Args[2:])
 
 		sc, _ := cf.loadScene()
@@ -114,6 +129,10 @@ func main() {
 		duration := fs.Float64("duration", 10.0, "walk duration in seconds")
 		speed := fs.Float64("speed", 0.5, "observer speed as fraction of c")
 		fps := fs.Int("fps", 30, "video framerate")
+		fs.Usage = func() {
+			fmt.Fprintf(os.Stderr, "Usage: relray walk [flags]\n\nRender a first-person walk-through video.\n\nFlags:\n")
+			fs.PrintDefaults()
+		}
 		fs.Parse(os.Args[2:])
 
 		sc, _ := cf.loadScene()
@@ -132,10 +151,22 @@ func main() {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: relray <command> [flags]
 
+Relativistic ray tracer — renders scenes with physically correct
+aberration, Doppler shift, and searchlight effects.
+
 Commands:
-  render    Render a single static image
-  sweep     Render a beta sweep video
-  walk      Render a walk-through video
+  render    Render a single static image (default)
+  sweep     Render a beta sweep video across a range of velocities
+  walk      Render a first-person walk-through video
+
+Common flags (all commands):
+  --width int       image width (default 800)
+  --height int      image height (default 600)
+  --samples int     samples per pixel (default 32)
+  --depth int       max ray bounces (default 8)
+  --scene string    built-in scene: spheres, room (default "spheres")
+  --file string     load scene from YAML file (overrides --scene)
+  --out string      output filename
 
 Run 'relray <command> --help' for command-specific flags.
 `)
