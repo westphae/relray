@@ -3,10 +3,16 @@ package spectrum
 import "math"
 
 const (
-	LambdaMin  = 380.0 // nm
-	LambdaMax  = 780.0 // nm
-	LambdaStep = 5.0   // nm
-	NumBands   = 81    // (780-380)/5 + 1
+	LambdaMin  = 200.0  // nm
+	LambdaMax  = 2000.0 // nm
+	LambdaStep = 5.0    // nm
+	NumBands   = 361    // (2000-200)/5 + 1
+
+	// Visible sub-range (for CIE integration — CIE functions are zero outside this)
+	visibleMin  = 380.0
+	visibleMax  = 780.0
+	visibleStart = 36  // band index of 380nm: (380-200)/5
+	visibleEnd   = 116 // band index of 780nm: (780-200)/5
 )
 
 // SPD represents a spectral power distribution sampled at 5nm intervals from 380nm to 780nm.
@@ -71,8 +77,9 @@ func (s SPD) Shift(factor float64) SPD {
 }
 
 // ToXYZ integrates the SPD against the CIE 1931 2° color matching functions.
+// Only iterates over the visible range (380-780nm) since CIE values are zero outside.
 func (s SPD) ToXYZ() (x, y, z float64) {
-	for i := 0; i < NumBands; i++ {
+	for i := visibleStart; i <= visibleEnd; i++ {
 		x += s[i] * cieX[i]
 		y += s[i] * cieY[i]
 		z += s[i] * cieZ[i]
@@ -185,6 +192,37 @@ func FromRGB(r, g, b float64) SPD {
 	return s
 }
 
+// FromReflectanceCurve creates an SPD from a set of (wavelength_nm, value) pairs.
+// The pairs are linearly interpolated to fill all bands. Wavelengths outside the
+// given range clamp to the nearest endpoint value. Points must be sorted by wavelength.
+func FromReflectanceCurve(points [][2]float64) SPD {
+	if len(points) == 0 {
+		return SPD{}
+	}
+	var s SPD
+	for i := range s {
+		lambda := Wavelength(i)
+		s[i] = interpolatePoints(points, lambda)
+	}
+	return s
+}
+
+func interpolatePoints(points [][2]float64, lambda float64) float64 {
+	if lambda <= points[0][0] {
+		return points[0][1]
+	}
+	if lambda >= points[len(points)-1][0] {
+		return points[len(points)-1][1]
+	}
+	for j := 1; j < len(points); j++ {
+		if lambda <= points[j][0] {
+			t := (lambda - points[j-1][0]) / (points[j][0] - points[j-1][0])
+			return points[j-1][1]*(1-t) + points[j][1]*t
+		}
+	}
+	return points[len(points)-1][1]
+}
+
 // Gaussian basis reflectances and their precomputed XYZ under D65.
 var (
 	basisR     SPD
@@ -194,12 +232,39 @@ var (
 )
 
 func init() {
-	// Build Gaussian basis reflectances
+	// Build Gaussian basis reflectances with IR/UV tails.
+	// The visible-range Gaussians are extended with smooth tails that approximate
+	// real material behavior: warm-colored materials have high near-IR reflectance,
+	// while blue materials absorb IR. UV reflectance is generally low for all.
 	for i := range basisR {
 		lambda := Wavelength(i)
-		basisR[i] = math.Exp(-0.5 * math.Pow((lambda-600)/40, 2))
-		basisG[i] = math.Exp(-0.5 * math.Pow((lambda-540)/35, 2))
-		basisB[i] = math.Exp(-0.5 * math.Pow((lambda-450)/30, 2))
+
+		// Visible-range Gaussians (same as before)
+		rVis := math.Exp(-0.5 * math.Pow((lambda-600)/40, 2))
+		gVis := math.Exp(-0.5 * math.Pow((lambda-540)/35, 2))
+		bVis := math.Exp(-0.5 * math.Pow((lambda-450)/30, 2))
+
+		// IR tails (>780nm): red materials stay reflective, green/blue decay
+		var rIR, gIR, bIR float64
+		if lambda > 780 {
+			t := (lambda - 780) / 500 // normalized distance into IR
+			rIR = 0.6 * math.Exp(-0.5*t*t)      // red: strong IR reflectance, slow decay
+			gIR = 0.3 * math.Exp(-2.0*t*t)       // green: moderate IR, faster decay
+			bIR = 0.05 * math.Exp(-3.0*t*t)      // blue: low IR reflectance
+		}
+
+		// UV tails (<380nm): most materials absorb UV
+		var rUV, gUV, bUV float64
+		if lambda < 380 {
+			t := (380 - lambda) / 100
+			rUV = 0.02 * math.Exp(-2.0*t*t)
+			gUV = 0.02 * math.Exp(-2.0*t*t)
+			bUV = 0.05 * math.Exp(-1.0*t*t) // blue pigments reflect slightly more UV
+		}
+
+		basisR[i] = rVis + rIR + rUV
+		basisG[i] = gVis + gIR + gUV
+		basisB[i] = bVis + bIR + bUV
 	}
 
 	// Compute XYZ of each basis under D65 illumination:

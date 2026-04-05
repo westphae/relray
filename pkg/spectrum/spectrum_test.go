@@ -38,28 +38,56 @@ func TestShiftIdentity(t *testing.T) {
 }
 
 func TestShiftRedshift(t *testing.T) {
-	// Monochromatic 550nm shifted by factor 2 -> 1100nm (outside visible range -> zero)
+	// Monochromatic 550nm shifted by factor 2 -> 1100nm (now within extended range)
 	m := Monochromatic(550, 1.0)
 	shifted := m.Shift(2.0)
+	// Energy should be at ~1100nm band, not in the visible range
+	_, y, _ := shifted.ToXYZ()
+	if y > eps {
+		t.Errorf("550nm redshifted to 1100nm should have zero visible luminance, got Y=%v", y)
+	}
+	// But total energy should be nonzero (it's in the IR now)
 	var total float64
 	for _, v := range shifted {
 		total += v
 	}
-	if total > eps {
-		t.Errorf("550nm redshifted to 1100nm should be zero, got total %v", total)
+	if total < eps {
+		t.Error("550nm redshifted to 1100nm should have IR energy in extended range")
 	}
 }
 
 func TestShiftBlueshift(t *testing.T) {
-	// Monochromatic 600nm shifted by factor 0.5 -> 300nm (outside visible range -> zero)
+	// Monochromatic 600nm shifted by factor 0.5 -> 300nm (now within extended range)
 	m := Monochromatic(600, 1.0)
 	shifted := m.Shift(0.5)
+	// Energy should be at ~300nm band, not in the visible range
+	_, y, _ := shifted.ToXYZ()
+	if y > eps {
+		t.Errorf("600nm blueshifted to 300nm should have zero visible luminance, got Y=%v", y)
+	}
+	// But total energy should be nonzero (it's in the UV now)
 	var total float64
 	for _, v := range shifted {
 		total += v
 	}
-	if total > eps {
-		t.Errorf("600nm blueshifted to 300nm should be zero, got total %v", total)
+	if total < eps {
+		t.Error("600nm blueshifted to 300nm should have UV energy in extended range")
+	}
+}
+
+func TestShiftIRIntoVisible(t *testing.T) {
+	// Key test: monochromatic 1000nm (invisible IR) blueshifted by factor 0.5 -> 500nm (visible green)
+	m := Monochromatic(1000, 1.0)
+	// Verify it's invisible
+	_, y, _ := m.ToXYZ()
+	if y > eps {
+		t.Errorf("1000nm should be invisible, got Y=%v", y)
+	}
+	// Blueshift by factor 0.5: lambda_obs = lambda_emit * 0.5
+	shifted := m.Shift(0.5)
+	_, y, _ = shifted.ToXYZ()
+	if y < 0.01 {
+		t.Errorf("1000nm blueshifted to 500nm should be visible, got Y=%v", y)
 	}
 }
 
