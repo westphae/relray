@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"sif/gogs/eric/relray/pkg/camera"
 	"sif/gogs/eric/relray/pkg/scene"
@@ -54,13 +55,8 @@ func RenderFrame(cfg Config, sc *scene.Scene, cam *camera.Camera) *image.RGBA {
 		}
 	}
 
-	// Dispatch tiles to workers
-	work := make(chan tile, len(tiles))
-	for _, t := range tiles {
-		work <- t
-	}
-	close(work)
-
+	// Dispatch tiles to workers via atomic counter (avoids channel overhead)
+	var nextTile atomic.Int64
 	var wg sync.WaitGroup
 	for i := range cfg.NumWorkers {
 		wg.Add(1)
@@ -68,8 +64,12 @@ func RenderFrame(cfg Config, sc *scene.Scene, cam *camera.Camera) *image.RGBA {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(int64(i) * 31337))
 			tracer := &Tracer{Scene: sc, Camera: cam, MaxDepth: cfg.MaxDepth, Rng: rng}
-			for t := range work {
-				renderTile(tracer, cfg, t, img, rng)
+			for {
+				idx := int(nextTile.Add(1)) - 1
+				if idx >= len(tiles) {
+					break
+				}
+				renderTile(tracer, cfg, tiles[idx], img, rng)
 			}
 		}()
 	}
@@ -86,19 +86,15 @@ func renderTile(tracer *Tracer, cfg Config, t tile, img *image.RGBA, rng *rand.R
 		for x := t.x0; x < t.x1; x++ {
 			var acc spectrum.SPD
 			for range cfg.SamplesPerPx {
-				// Random jitter within pixel for antialiasing
 				jx := rng.Float64()
 				jy := rng.Float64()
 				u := (float64(x) + jx) * invW
-				v := (float64(y) + jy) * invH
-				// Flip v so that y=0 is bottom of image
-				v = 1.0 - v
+				v := 1.0 - (float64(y)+jy)*invH
 				spd := tracer.Trace(u, v)
-				acc = acc.Add(spd)
+				acc.AddInPlace(&spd)
 			}
-			acc = acc.Scale(invS)
+			acc.ScaleInPlace(invS)
 
-			// Convert SPD → XYZ → sRGB
 			cx, cy, cz := acc.ToXYZ()
 			r, g, b := spectrum.XYZToSRGB(cx, cy, cz)
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})

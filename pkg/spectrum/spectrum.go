@@ -1,6 +1,10 @@
 package spectrum
 
-import "math"
+import (
+	"math"
+
+	"github.com/viterin/vek"
+)
 
 const (
 	LambdaMin  = 200.0  // nm
@@ -30,26 +34,34 @@ func BandIndex(lambda float64) float64 {
 
 func (s SPD) Add(other SPD) SPD {
 	var r SPD
-	for i := range r {
-		r[i] = s[i] + other[i]
-	}
+	vek.Add_Into(r[:], s[:], other[:])
 	return r
 }
 
 func (s SPD) Mul(other SPD) SPD {
 	var r SPD
-	for i := range r {
-		r[i] = s[i] * other[i]
-	}
+	vek.Mul_Into(r[:], s[:], other[:])
 	return r
 }
 
 func (s SPD) Scale(f float64) SPD {
 	var r SPD
-	for i := range r {
-		r[i] = s[i] * f
-	}
+	vek.MulNumber_Into(r[:], s[:], f)
 	return r
+}
+
+// In-place variants for hot paths — avoid copying 2888-byte arrays.
+
+func (s *SPD) AddInPlace(other *SPD) {
+	vek.Add_Inplace(s[:], other[:])
+}
+
+func (s *SPD) MulInPlace(other *SPD) {
+	vek.Mul_Inplace(s[:], other[:])
+}
+
+func (s *SPD) ScaleInPlace(f float64) {
+	vek.MulNumber_Inplace(s[:], f)
 }
 
 // Shift returns a new SPD with wavelengths scaled by factor.
@@ -61,32 +73,35 @@ func (s SPD) Shift(factor float64) SPD {
 		return s
 	}
 	var r SPD
+	// Precompute: for output band i at wavelength LambdaMin + i*LambdaStep,
+	// the source wavelength is (LambdaMin + i*LambdaStep) / factor.
+	// The source band index is ((LambdaMin + i*LambdaStep)/factor - LambdaMin) / LambdaStep
+	//   = (LambdaMin/factor - LambdaMin)/LambdaStep + i/factor
+	//   = startIdx + i * step
+	invFactor := 1.0 / factor
+	startIdx := (LambdaMin*invFactor - LambdaMin) / LambdaStep
+	step := invFactor
+	maxIdx := float64(NumBands - 1)
+
+	idx := startIdx
 	for i := range r {
-		// What original wavelength maps to this band after shifting?
-		// new_lambda = old_lambda * factor, so old_lambda = new_lambda / factor
-		origLambda := Wavelength(i) / factor
-		idx := BandIndex(origLambda)
-		if idx < 0 || idx >= float64(NumBands-1) {
-			continue // outside visible range
+		if idx >= 0 && idx < maxIdx {
+			lo := int(idx)
+			frac := idx - float64(lo)
+			r[i] = math.FMA(s[lo+1]-s[lo], frac, s[lo])
 		}
-		lo := int(idx)
-		frac := idx - float64(lo)
-		r[i] = s[lo]*(1-frac) + s[lo+1]*frac
+		idx += step
 	}
 	return r
 }
 
 // ToXYZ integrates the SPD against the CIE 1931 2° color matching functions.
-// Only iterates over the visible range (380-780nm) since CIE values are zero outside.
+// Only integrates over the visible range (380-780nm) since CIE values are zero outside.
 func (s SPD) ToXYZ() (x, y, z float64) {
-	for i := visibleStart; i <= visibleEnd; i++ {
-		x += s[i] * cieX[i]
-		y += s[i] * cieY[i]
-		z += s[i] * cieZ[i]
-	}
-	x *= LambdaStep
-	y *= LambdaStep
-	z *= LambdaStep
+	vis := s[visibleStart : visibleEnd+1]
+	x = vek.Dot(vis, cieX[visibleStart:visibleEnd+1]) * LambdaStep
+	y = vek.Dot(vis, cieY[visibleStart:visibleEnd+1]) * LambdaStep
+	z = vek.Dot(vis, cieZ[visibleStart:visibleEnd+1]) * LambdaStep
 	return
 }
 

@@ -24,13 +24,11 @@ func (tr *Tracer) Trace(u, v float64) spectrum.SPD {
 	dirObs := tr.Camera.RayDir(u, v)
 
 	ab := lorentz.Aberrate(dirObs, tr.Camera.Beta)
-	dirWorld := ab.Dir
-	doppler := ab.Doppler
 
-	spd := tr.traceWorld(tr.Camera.Position, dirWorld, tr.MaxDepth)
+	spd := tr.traceWorld(tr.Camera.Position, ab.Dir, tr.MaxDepth)
 
-	spd = spd.Shift(1.0 / doppler)
-	spd = spd.Scale(doppler * doppler * doppler)
+	spd = spd.Shift(1.0 / ab.Doppler)
+	spd.ScaleInPlace(ab.Doppler * ab.Doppler * ab.Doppler)
 
 	return spd
 }
@@ -69,34 +67,32 @@ func (tr *Tracer) traceWorld(origin, dir vec.Vec3, depth int) spectrum.SPD {
 		}
 
 		falloff := cosTheta / (4 * math.Pi * dist * dist)
-		direct = direct.Add(light.Emission.Scale(falloff))
+		tmp := light.Emission
+		tmp.ScaleInPlace(falloff)
+		direct.AddInPlace(&tmp)
 	}
 
 	scatter := mat.Scatter(dir, hit, tr.Rng)
-	directContrib := direct.Mul(scatter.Reflectance)
+	direct.MulInPlace(&scatter.Reflectance)
 
 	// Indirect lighting (recursive bounce)
-	var indirect spectrum.SPD
 	if scatter.Scattered && depth > 1 {
 		bounced := tr.traceWorld(hit.Point, scatter.OutDir, depth-1)
-		indirect = bounced.Mul(scatter.Reflectance)
+		bounced.MulInPlace(&scatter.Reflectance)
+		direct.AddInPlace(&bounced)
 	}
 
-	result := emitted.Add(directContrib).Add(indirect)
+	// result = emitted + direct (which now includes indirect)
+	emitted.AddInPlace(&direct)
 
-	// Apply source Doppler shift for moving objects.
-	// The source emits/reflects light while moving, so the photon frequency
-	// is shifted by the source's velocity relative to the photon direction.
-	// D_source = 1 / (gamma * (1 - beta_source · n_photon))
-	// where n_photon = -dir (photon travels from source toward observer).
+	// Source Doppler shift for moving objects
 	if v := hit.SourceVelocity; v.LengthSq() > 0 {
-		beta := v // velocity as fraction of c (since C=1)
-		nPhoton := dir.Neg().Normalize() // photon propagation: source → observer
-		gamma := 1.0 / math.Sqrt(1.0-beta.LengthSq())
-		dSource := 1.0 / (gamma * (1.0 - beta.Dot(nPhoton)))
-		result = result.Shift(1.0 / dSource)
-		result = result.Scale(dSource * dSource * dSource)
+		nPhoton := dir.Neg().Normalize()
+		gamma := 1.0 / math.Sqrt(1.0-v.LengthSq())
+		dSource := 1.0 / (gamma * (1.0 - v.Dot(nPhoton)))
+		emitted = emitted.Shift(1.0 / dSource)
+		emitted.ScaleInPlace(dSource * dSource * dSource)
 	}
 
-	return result
+	return emitted
 }
