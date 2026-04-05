@@ -6,33 +6,38 @@ import (
 	"sif/gogs/eric/relray/pkg/vec"
 )
 
-// Box is an axis-aligned bounding box defined by min and max corners.
+// Box is an axis-aligned box centered at the origin with the given size.
+// It extends from -Size/2 to +Size/2 on each axis.
+// Use a Transformed wrapper to position and orient it in the scene.
 type Box struct {
-	Min, Max vec.Vec3
+	Size vec.Vec3
 }
 
 func (b *Box) Intersect(origin, dir vec.Vec3, tMin, tMax float64) (Hit, bool) {
-	// Slab method
+	halfX := b.Size.X / 2
+	halfY := b.Size.Y / 2
+	halfZ := b.Size.Z / 2
+
 	invD := vec.Vec3{
 		X: 1.0 / dir.X,
 		Y: 1.0 / dir.Y,
 		Z: 1.0 / dir.Z,
 	}
 
-	t0x := (b.Min.X - origin.X) * invD.X
-	t1x := (b.Max.X - origin.X) * invD.X
+	t0x := (-halfX - origin.X) * invD.X
+	t1x := (halfX - origin.X) * invD.X
 	if invD.X < 0 {
 		t0x, t1x = t1x, t0x
 	}
 
-	t0y := (b.Min.Y - origin.Y) * invD.Y
-	t1y := (b.Max.Y - origin.Y) * invD.Y
+	t0y := (-halfY - origin.Y) * invD.Y
+	t1y := (halfY - origin.Y) * invD.Y
 	if invD.Y < 0 {
 		t0y, t1y = t1y, t0y
 	}
 
-	t0z := (b.Min.Z - origin.Z) * invD.Z
-	t1z := (b.Max.Z - origin.Z) * invD.Z
+	t0z := (-halfZ - origin.Z) * invD.Z
+	t1z := (halfZ - origin.Z) * invD.Z
 	if invD.Z < 0 {
 		t0z, t1z = t1z, t0z
 	}
@@ -54,20 +59,18 @@ func (b *Box) Intersect(origin, dir vec.Vec3, tMin, tMax float64) (Hit, bool) {
 
 	p := origin.Add(dir.Scale(t))
 
-	// Determine which face was hit by finding which component of the hit point
-	// is closest to a face
 	var normal vec.Vec3
 	const bias = 1e-6
 	switch {
-	case math.Abs(p.X-b.Min.X) < bias:
+	case math.Abs(p.X+halfX) < bias:
 		normal = vec.Vec3{X: -1}
-	case math.Abs(p.X-b.Max.X) < bias:
+	case math.Abs(p.X-halfX) < bias:
 		normal = vec.Vec3{X: 1}
-	case math.Abs(p.Y-b.Min.Y) < bias:
+	case math.Abs(p.Y+halfY) < bias:
 		normal = vec.Vec3{Y: -1}
-	case math.Abs(p.Y-b.Max.Y) < bias:
+	case math.Abs(p.Y-halfY) < bias:
 		normal = vec.Vec3{Y: 1}
-	case math.Abs(p.Z-b.Min.Z) < bias:
+	case math.Abs(p.Z+halfZ) < bias:
 		normal = vec.Vec3{Z: -1}
 	default:
 		normal = vec.Vec3{Z: 1}

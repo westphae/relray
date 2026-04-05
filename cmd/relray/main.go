@@ -324,6 +324,21 @@ func runWalk(cfg render.Config, sc *scene.Scene, width, height int, duration, sp
 	fmt.Printf("Saved to %s\n", outFile)
 }
 
+// at returns a shape positioned at the given coordinates (no rotation).
+func at(shape geometry.Shape, x, y, z float64) geometry.Shape {
+	return geometry.NewTransformed(shape, vec.Vec3{X: x, Y: y, Z: z}, vec.Identity())
+}
+
+// atRot returns a shape positioned and rotated (Euler angles in degrees).
+func atRot(shape geometry.Shape, x, y, z, yaw, pitch, roll float64) geometry.Shape {
+	return geometry.NewTransformed(shape, vec.Vec3{X: x, Y: y, Z: z}, vec.RotationFromEulerDeg(yaw, pitch, roll))
+}
+
+// box creates a box shape with given width, height, depth positioned at the given center.
+func box(w, h, d, cx, cy, cz float64) geometry.Shape {
+	return at(&geometry.Box{Size: vec.Vec3{X: w, Y: h, Z: d}}, cx, cy, cz)
+}
+
 // buildSpheresScene creates the original test scene with three colored spheres.
 func buildSpheresScene() *scene.Scene {
 	sunlight := spectrum.Blackbody(5778, 1.0)
@@ -344,12 +359,12 @@ func buildSpheresScene() *scene.Scene {
 	return &scene.Scene{
 		Name: "spheres",
 		Objects: []scene.Object{
-			{Shape: &geometry.Plane{Point: vec.Vec3{Y: -0.5}, Normal: vec.Vec3{Y: 1}}, Material: floor},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -1.8, Y: 0, Z: 1.5}, Radius: 0.5}, Material: red},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: -0.6, Y: 0, Z: 2}, Radius: 0.5}, Material: green},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 0.6, Y: 0, Z: 2}, Radius: 0.5}, Material: mirror},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 1.8, Y: 0, Z: 1.5}, Radius: 0.5}, Material: glass},
-			{Shape: &geometry.Sphere{Center: vec.Vec3{X: 0, Y: -0.3, Z: 1}, Radius: 0.2}, Material: blue},
+			{Shape: at(&geometry.Plane{}, 0, -0.5, 0), Material: floor},
+			{Shape: at(&geometry.Sphere{Radius: 0.5}, -1.8, 0, 1.5), Material: red},
+			{Shape: at(&geometry.Sphere{Radius: 0.5}, -0.6, 0, 2), Material: green},
+			{Shape: at(&geometry.Sphere{Radius: 0.5}, 0.6, 0, 2), Material: mirror},
+			{Shape: at(&geometry.Sphere{Radius: 0.5}, 1.8, 0, 1.5), Material: glass},
+			{Shape: at(&geometry.Sphere{Radius: 0.2}, 0, -0.3, 1), Material: blue},
 		},
 		Lights: []scene.Light{
 			{Position: vec.Vec3{X: 2, Y: 5, Z: 0}, Emission: sunlight.Scale(15)},
@@ -390,62 +405,36 @@ func buildRoomScene() *scene.Scene {
 	sc := &scene.Scene{
 		Name: "room",
 		Objects: []scene.Object{
-			// Floor
-			{Shape: &geometry.Plane{Point: vec.Vec3{Y: 0}, Normal: vec.Vec3{Y: 1}}, Material: floorWood},
-			// Ceiling
-			{Shape: &geometry.Plane{Point: vec.Vec3{Y: 2.5}, Normal: vec.Vec3{Y: -1}}, Material: ceiling},
-			// Back wall (Z=6)
-			{Shape: &geometry.Plane{Point: vec.Vec3{Z: 6}, Normal: vec.Vec3{Z: -1}}, Material: wallAccent},
-			// Left wall (X=-3)
-			{Shape: &geometry.Plane{Point: vec.Vec3{X: -3}, Normal: vec.Vec3{X: 1}}, Material: wallWhite},
-			// Right wall (X=3) — has "window" (we'll fake it with a bright light)
-			{Shape: &geometry.Plane{Point: vec.Vec3{X: 3}, Normal: vec.Vec3{X: -1}}, Material: wallWhite},
-			// Front wall behind camera (Z=-2)
-			{Shape: &geometry.Plane{Point: vec.Vec3{Z: -2}, Normal: vec.Vec3{Z: 1}}, Material: wallWhite},
+			// Floor (Y=0, normal +Y — default plane orientation)
+			{Shape: at(&geometry.Plane{}, 0, 0, 0), Material: floorWood},
+			// Ceiling (Y=2.5, normal -Y — flip plane 180°)
+			{Shape: atRot(&geometry.Plane{}, 0, 2.5, 0, 0, 0, 180), Material: ceiling},
+			// Back wall (Z=6, normal -Z — rotate plane -90° pitch)
+			{Shape: atRot(&geometry.Plane{}, 0, 0, 6, 0, -90, 0), Material: wallAccent},
+			// Left wall (X=-3, normal +X — rotate plane 90° roll)
+			{Shape: atRot(&geometry.Plane{}, -3, 0, 0, 0, 0, 90), Material: wallWhite},
+			// Right wall (X=3, normal -X — rotate plane -90° roll)
+			{Shape: atRot(&geometry.Plane{}, 3, 0, 0, 0, 0, -90), Material: wallWhite},
+			// Front wall (Z=-2, normal +Z — rotate plane 90° pitch)
+			{Shape: atRot(&geometry.Plane{}, 0, 0, -2, 0, 90, 0), Material: wallWhite},
 
-			// Coffee table (box in center of room)
-			{Shape: &geometry.Box{
-				Min: vec.Vec3{X: -0.5, Y: 0, Z: 2.5},
-				Max: vec.Vec3{X: 0.5, Y: 0.4, Z: 3.5},
-			}, Material: tableMat},
-
-			// Couch (left side of room) — simple box
-			{Shape: &geometry.Box{
-				Min: vec.Vec3{X: -2.8, Y: 0, Z: 1.5},
-				Max: vec.Vec3{X: -1.5, Y: 0.45, Z: 4.5},
-			}, Material: furniture},
-			// Couch back
-			{Shape: &geometry.Box{
-				Min: vec.Vec3{X: -2.8, Y: 0.45, Z: 1.5},
-				Max: vec.Vec3{X: -2.5, Y: 0.9, Z: 4.5},
-			}, Material: furniture},
-			// Couch cushion
-			{Shape: &geometry.Box{
-				Min: vec.Vec3{X: -2.5, Y: 0.45, Z: 1.7},
-				Max: vec.Vec3{X: -1.6, Y: 0.55, Z: 4.3},
-			}, Material: cushion},
-
-			// Bookshelf (right side, against wall)
-			{Shape: &geometry.Box{
-				Min: vec.Vec3{X: 1.8, Y: 0, Z: 4.0},
-				Max: vec.Vec3{X: 2.8, Y: 1.8, Z: 5.8},
-			}, Material: furniture},
+			// Coffee table: 1.0 x 0.4 x 1.0, centered at (0, 0.2, 3.0)
+			{Shape: box(1.0, 0.4, 1.0, 0, 0.2, 3.0), Material: tableMat},
+			// Couch base: 1.3 x 0.45 x 3.0, centered at (-2.15, 0.225, 3.0)
+			{Shape: box(1.3, 0.45, 3.0, -2.15, 0.225, 3.0), Material: furniture},
+			// Couch back: 0.3 x 0.45 x 3.0, centered at (-2.65, 0.675, 3.0)
+			{Shape: box(0.3, 0.45, 3.0, -2.65, 0.675, 3.0), Material: furniture},
+			// Couch cushion: 0.9 x 0.1 x 2.6, centered at (-2.05, 0.5, 3.0)
+			{Shape: box(0.9, 0.1, 2.6, -2.05, 0.5, 3.0), Material: cushion},
+			// Bookshelf: 1.0 x 1.8 x 1.8, centered at (2.3, 0.9, 4.9)
+			{Shape: box(1.0, 1.8, 1.8, 2.3, 0.9, 4.9), Material: furniture},
 
 			// Glass globe on coffee table
-			{Shape: &geometry.Sphere{
-				Center: vec.Vec3{X: 0.1, Y: 0.55, Z: 3.0},
-				Radius: 0.12,
-			}, Material: glassMat},
+			{Shape: at(&geometry.Sphere{Radius: 0.12}, 0.1, 0.55, 3.0), Material: glassMat},
 			// Small mirror sphere on coffee table
-			{Shape: &geometry.Sphere{
-				Center: vec.Vec3{X: -0.2, Y: 0.52, Z: 2.8},
-				Radius: 0.08,
-			}, Material: mirrorMat},
+			{Shape: at(&geometry.Sphere{Radius: 0.08}, -0.2, 0.52, 2.8), Material: mirrorMat},
 			// Red decorative ball
-			{Shape: &geometry.Sphere{
-				Center: vec.Vec3{X: 0.3, Y: 0.5, Z: 3.2},
-				Radius: 0.08,
-			}, Material: ballMat},
+			{Shape: at(&geometry.Sphere{Radius: 0.08}, 0.3, 0.5, 3.2), Material: ballMat},
 		},
 
 		// Orbiting globe above the coffee table, suspended from ceiling.

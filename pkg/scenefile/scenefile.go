@@ -122,8 +122,10 @@ func convertSPD(s *SPDSpec) (spectrum.SPD, error) {
 		return spectrum.D65().Scale(*s.D65), nil
 	case s.Monochromatic != nil:
 		return spectrum.Monochromatic(s.Monochromatic.Wavelength, s.Monochromatic.Power), nil
+	case s.Reflectance != nil:
+		return spectrum.FromReflectanceCurve(*s.Reflectance), nil
 	default:
-		return spectrum.SPD{}, fmt.Errorf("no SPD type specified (use rgb, blackbody, constant, d65, or monochromatic)")
+		return spectrum.SPD{}, fmt.Errorf("no SPD type specified (use rgb, blackbody, constant, d65, monochromatic, or reflectance)")
 	}
 }
 
@@ -135,17 +137,17 @@ func convertShape(s *ShapeSpec) (geometry.Shape, error) {
 
 	switch {
 	case s.Sphere != nil:
-		shape = &geometry.Sphere{Center: v3(s.Sphere.Center), Radius: s.Sphere.Radius}
+		shape = &geometry.Sphere{Radius: s.Sphere.Radius}
 	case s.Plane != nil:
-		shape = &geometry.Plane{Point: v3(s.Plane.Point), Normal: v3(s.Plane.Normal).Normalize()}
+		shape = &geometry.Plane{}
 	case s.Box != nil:
-		shape = &geometry.Box{Min: v3(s.Box.Min), Max: v3(s.Box.Max)}
+		shape = &geometry.Box{Size: v3(s.Box.Size)}
 	case s.Cylinder != nil:
 		shape = &geometry.Cylinder{Radius: s.Cylinder.Radius, Height: s.Cylinder.Height}
 	case s.Cone != nil:
 		shape = &geometry.Cone{Radius: s.Cone.Radius, Height: s.Cone.Height}
 	case s.Disk != nil:
-		shape = &geometry.Disk{Center: v3(s.Disk.Center), Normal: v3(s.Disk.Normal).Normalize(), Radius: s.Disk.Radius}
+		shape = &geometry.Disk{Radius: s.Disk.Radius}
 	case s.Triangle != nil:
 		shape = &geometry.Triangle{V0: v3(s.Triangle.V0), V1: v3(s.Triangle.V1), V2: v3(s.Triangle.V2)}
 	case s.Pyramid != nil:

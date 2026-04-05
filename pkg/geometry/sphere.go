@@ -6,17 +6,16 @@ import (
 	"sif/gogs/eric/relray/pkg/vec"
 )
 
-// Sphere is a geometric sphere defined by center and radius.
+// Sphere is centered at the origin with the given radius.
+// Use a Transformed wrapper to position it in the scene.
 type Sphere struct {
-	Center vec.Vec3
 	Radius float64
 }
 
 func (s *Sphere) Intersect(origin, dir vec.Vec3, tMin, tMax float64) (Hit, bool) {
-	oc := origin.Sub(s.Center)
 	a := dir.LengthSq()
-	halfB := oc.Dot(dir)
-	c := oc.LengthSq() - s.Radius*s.Radius
+	halfB := origin.Dot(dir)
+	c := origin.LengthSq() - s.Radius*s.Radius
 	disc := halfB*halfB - a*c
 	if disc < 0 {
 		return Hit{}, false
@@ -32,7 +31,7 @@ func (s *Sphere) Intersect(origin, dir vec.Vec3, tMin, tMax float64) (Hit, bool)
 	}
 
 	p := origin.Add(dir.Scale(t))
-	outward := p.Sub(s.Center).Scale(1.0 / s.Radius)
+	outward := p.Scale(1.0 / s.Radius)
 	h := Hit{T: t, Point: p}
 	h.SetFaceNormal(dir, outward)
 	return h, true

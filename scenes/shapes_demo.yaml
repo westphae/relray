@@ -19,7 +19,7 @@ lights:
 
 objects:
   # Checkerboard floor
-  - shape: { plane: { point: [0, 0, 0], normal: [0, 1, 0] } }
+  - shape: { plane: {} }
     material:
       checker:
         even: { rgb: [0.6, 0.6, 0.6] }
@@ -41,7 +41,9 @@ objects:
       diffuse: { rgb: [0.9, 0.3, 0.1] }
 
   # Disk (plate on the ground)
-  - shape: { disk: { center: [0.5, 0.01, 2], normal: [0, 1, 0], radius: 0.3 } }
+  - shape:
+      disk: { radius: 0.3 }
+      position: [0.5, 0.01, 2]
     material:
       diffuse: { rgb: [0.9, 0.9, 0.85] }
 
@@ -59,13 +61,15 @@ objects:
 
   # Rotated mirror box — tilted to reflect the colored shapes
   - shape:
-      box: { min: [-0.35, 0, -0.35], max: [0.35, 0.7, 0.35] }
-      position: [0.5, 0, 3.5]
+      box: { size: [0.7, 0.7, 0.7] }
+      position: [0.5, 0.35, 3.5]
       rotation: [30, 15, 0]
     material:
       mirror: { constant: 0.9 }
 
   # Glass sphere for reference
-  - shape: { sphere: { center: [-0.5, 0.3, 3.5], radius: 0.3 } }
+  - shape:
+      sphere: { radius: 0.3 }
+      position: [-0.5, 0.3, 3.5]
     material:
       glass: { ior: 1.5, tint: { constant: 1.0 } }

@@ -66,18 +66,13 @@ type ShapeSpec struct {
 }
 
 type SphereSpec struct {
-	Center [3]float64 `yaml:"center"`
-	Radius float64    `yaml:"radius"`
+	Radius float64 `yaml:"radius"`
 }
 
-type PlaneSpec struct {
-	Point  [3]float64 `yaml:"point"`
-	Normal [3]float64 `yaml:"normal"`
-}
+type PlaneSpec struct{} // XZ plane at origin, normal +Y; use position/rotation to place
 
 type BoxSpec struct {
-	Min [3]float64 `yaml:"min"`
-	Max [3]float64 `yaml:"max"`
+	Size [3]float64 `yaml:"size"` // [width, height, depth], centered at origin
 }
 
 type CylinderSpec struct {
@@ -91,9 +86,7 @@ type ConeSpec struct {
 }
 
 type DiskSpec struct {
-	Center [3]float64 `yaml:"center"`
-	Normal [3]float64 `yaml:"normal"`
-	Radius float64    `yaml:"radius"`
+	Radius float64 `yaml:"radius"` // on XZ plane at origin, normal +Y
 }
 
 type TriangleSpec struct {
@@ -169,11 +162,12 @@ type OrbitTrajSpec struct {
 // SPDSpec is a tagged union for spectral power distributions.
 // Exactly one field should be set.
 type SPDSpec struct {
-	RGB          *[3]float64       `yaml:"rgb,omitempty"`
-	Blackbody    *BlackbodySpec    `yaml:"blackbody,omitempty"`
-	Constant     *float64          `yaml:"constant,omitempty"`
-	D65          *float64          `yaml:"d65,omitempty"`
+	RGB           *[3]float64        `yaml:"rgb,omitempty"`
+	Blackbody     *BlackbodySpec     `yaml:"blackbody,omitempty"`
+	Constant      *float64           `yaml:"constant,omitempty"`
+	D65           *float64           `yaml:"d65,omitempty"`
 	Monochromatic *MonochromaticSpec `yaml:"monochromatic,omitempty"`
+	Reflectance   *[][2]float64      `yaml:"reflectance,omitempty"` // [[wavelength_nm, value], ...]
 }
 
 type BlackbodySpec struct {
