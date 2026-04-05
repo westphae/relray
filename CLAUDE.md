@@ -28,7 +28,8 @@ Three subcommands: `render` (single image), `sweep` (beta sweep video), `walk` (
 - `cmd/relray/` — CLI entry point, built-in scene definitions, subcommand dispatch
 - `pkg/vec/` — Vec3, Mat3 (rotation matrices), vector/matrix math
 - `pkg/lorentz/` — Lorentz boost of null 4-vectors: aberration + Doppler factor
-- `pkg/spectrum/` — 81-band SPD (380-780nm), CIE 1931 color matching, blackbody, sRGB conversion
+- `pkg/spectrum/` — 361-band SPD (200-2000nm), CIE 1931 color matching, blackbody, sRGB conversion
+- `cmd/gencie/` — generator tool for CIE/D65 data arrays (run to regenerate `pkg/spectrum/cie_data.go`)
 - `pkg/geometry/` — Shape interface + primitives (sphere, plane, box, cylinder, cone, disk, triangle, pyramid) + transform wrapper
 - `pkg/material/` — Material interface + implementations (diffuse, mirror, glass, checker, checker_sphere)
 - `pkg/scene/` — Scene graph (static + moving objects, lights, sky)
@@ -41,7 +42,7 @@ Three subcommands: `render` (single image), `sweep` (beta sweep video), `walk` (
 ## Architecture Principles
 
 - **Physically correct**: Lorentz transformations apply to rays natively; relativistic effects are not approximated or composited
-- **Spectral rendering**: objects carry full-spectrum reflectivity/emission data so Doppler wavelength shifts produce correct colors
+- **Extended spectral rendering**: 361-band SPD covering 200-2000nm (near-UV through near-IR) so that Doppler-shifted IR/UV energy correctly enters or leaves the visible range. CIE color matching integrates only over the visible sub-range (380-780nm)
 - **Special relativity only**: flat spacetime, straight rays — no general relativity
 - **Retarded time**: moving objects are rendered at their position when the light left them, solved iteratively
 - **Source + observer Doppler**: both the camera's velocity and the object's velocity contribute Doppler shift

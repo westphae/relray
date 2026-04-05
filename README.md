@@ -73,26 +73,43 @@ moving_objects:
 
 ### Shapes
 
-All shapes can have optional `position` and `rotation` fields to translate and rotate them.
+All shapes are defined at the origin in a canonical orientation and placed in the scene using `position` and `rotation` (Euler angles in degrees: yaw, pitch, roll). Triangle is the only exception — its vertices define its position directly.
 
-| Shape | Fields | Use cases |
-|-------|--------|-----------|
-| `sphere` | `center`, `radius` | Balls, globes, decorations, planets |
-| `plane` | `point`, `normal` | Floors, walls, ceilings, mirrors |
-| `box` | `min`, `max` | Furniture, buildings, shelves, steps |
-| `cylinder` | `radius`, `height` | Table legs, columns, pipes, candles, bottles |
-| `cone` | `radius`, `height` | Lamp shades, trees, funnels, rooftops |
-| `disk` | `center`, `normal`, `radius` | Table tops, plates, clock faces, mirrors |
-| `triangle` | `v0`, `v1`, `v2` | Arbitrary faces, wedges, ramps |
-| `pyramid` | `base_radius`, `height`, `sides` | Decorative objects, rooftops, obelisks |
+| Shape | Intrinsic fields | Default orientation | Use cases |
+|-------|-----------------|-------------------|-----------|
+| `sphere` | `radius` | centered at origin | Balls, globes, decorations, planets |
+| `plane` | (none) | XZ plane, normal +Y | Floors, walls, ceilings |
+| `box` | `size: [w, h, d]` | centered at origin | Furniture, buildings, shelves, steps |
+| `cylinder` | `radius`, `height` | base at origin, up Y | Table legs, columns, pipes, candles |
+| `cone` | `radius`, `height` | base at origin, apex up Y | Lamp shades, trees, funnels |
+| `disk` | `radius` | XZ plane, normal +Y | Table tops, plates, clock faces |
+| `triangle` | `v0`, `v1`, `v2` | vertices define position | Arbitrary faces, wedges, ramps |
+| `pyramid` | `base_radius`, `height`, `sides` | base at origin, up Y | Decorative objects, rooftops |
 
-Cylinder, cone, and pyramid are defined in local space (base at Y=0, extending up). Use `position` and `rotation` to place them:
+Examples:
 
 ```yaml
+# Sphere placed at a specific location
+- shape:
+    sphere: { radius: 0.5 }
+    position: [1, 0, 2]
+
+# Wall: plane rotated so normal points +Z, positioned at Z=-2
+- shape:
+    plane: {}
+    position: [0, 0, -2]
+    rotation: [0, 90, 0]
+
+# Tilted cylinder
 - shape:
     cylinder: { radius: 0.05, height: 0.8 }
     position: [1, 0, 2]
     rotation: [0, 0, 90]       # yaw, pitch, roll in degrees
+
+# Box positioned by its center
+- shape:
+    box: { size: [1.0, 0.4, 1.0] }
+    position: [0, 0.2, 3.0]
 ```
 
 ### Materials
@@ -107,15 +124,33 @@ Cylinder, cone, and pyramid are defined in local space (base at Y=0, extending u
 
 ### Spectral power distributions (SPD)
 
-Colors and light spectra are defined spectrally, not as RGB. This is essential for physically correct Doppler shifting — wavelengths actually shift, producing realistic color changes.
+All colors and light spectra are defined spectrally using 361 bands covering **200-2000nm** (near-UV through near-IR) at 5nm resolution. This extended range is essential for physically correct Doppler shifting — under blueshift, infrared energy from blackbody light sources shifts into the visible range, and under redshift, visible light shifts to IR while UV enters the visible blue end.
+
+CIE color matching integrates only over the visible sub-range (380-780nm). The extra UV/IR bands carry energy that becomes visible when Doppler-shifted.
 
 | Type | Syntax | Description |
 |------|--------|-------------|
-| RGB | `{ rgb: [r, g, b] }` | Approximate SPD from linear sRGB (for reflectances) |
-| Blackbody | `{ blackbody: { temp: 5778, luminance: 1.0 } }` | Planck function at given temperature |
-| D65 | `{ d65: 1.0 }` | CIE D65 daylight illuminant, scaled |
-| Constant | `{ constant: 0.5 }` | Flat spectrum across all wavelengths |
+| RGB | `{ rgb: [r, g, b] }` | Approximate SPD from linear sRGB, with plausible IR/UV tails |
+| Blackbody | `{ blackbody: { temp: 5778, luminance: 1.0 } }` | Planck function across full 200-2000nm range |
+| D65 | `{ d65: 1.0 }` | CIE D65 daylight illuminant, extended into UV/IR |
+| Constant | `{ constant: 0.5 }` | Flat spectrum across all bands |
 | Monochromatic | `{ monochromatic: { wavelength: 550, power: 1.0 } }` | Single wavelength (nm) |
+| Reflectance | `{ reflectance: [[λ, v], ...] }` | Measured reflectance curve, linearly interpolated |
+
+The `reflectance` type allows physically accurate material definitions with wavelength-dependent reflectance across the full spectral range:
+
+```yaml
+material:
+  diffuse:
+    reflectance:
+      - [200, 0.02]    # low UV reflectance
+      - [400, 0.05]    # absorbs blue
+      - [550, 0.10]    # absorbs green
+      - [650, 0.85]    # reflects red
+      - [780, 0.80]    # high near-IR reflectance
+      - [1200, 0.75]
+      - [2000, 0.60]
+```
 
 ### Trajectories (for moving objects)
 
@@ -140,10 +175,11 @@ Moving objects are rendered at their retarded-time position (where they were whe
 The renderer produces these effects natively from the physics:
 
 - **Aberration**: Forward compression of the field of view at high speed
-- **Doppler shift**: Colors shift blue (approaching) or red (receding) for both observer and source motion
+- **Doppler shift**: Colors shift blue (approaching) or red (receding) for both observer and source motion. The extended 200-2000nm spectral range means IR light from blackbody sources correctly blueshifts into the visible range, keeping scenes bright at high velocities
 - **Searchlight effect**: D³ intensity scaling — forward hemisphere brightens, backward dims
 - **Retarded time**: Moving objects appear where they were when the light left them
 - **Penrose-Terrell rotation**: A moving sphere still appears spherical (use checker_sphere to see the rotation)
+- **Source Doppler**: Moving objects exhibit their own Doppler shift independent of the observer's motion
 
 ## Example scenes
 
