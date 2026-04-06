@@ -2,10 +2,39 @@
 
 A relativistic ray tracer that renders scenes where the speed of light is reduced to a human scale (~1 m/s). All visual effects — aberration, Doppler shift, searchlight effect, time dilation — emerge naturally from the physics, not as post-processing.
 
-## Building
+## Repository structure
+
+This is a multi-language project. The Go implementation lives at the repo root, with Rust and C/CUDA in subdirectories. All share the same `scenes/` directory and YAML scene file format.
 
 ```
+relray/
+  cmd/relray/         Go CLI entry point
+  pkg/                Go packages (spectrum, geometry, material, render, ...)
+  scenes/             Shared YAML scene files
+  rust/               Rust implementation (Cargo)
+  c/                  C/CUDA implementation (Make)
+```
+
+## Building
+
+**Go** (from repo root):
+```
 go build ./cmd/relray/
+go install ./cmd/relray/
+```
+
+**Rust** (from `rust/`):
+```
+cd rust
+cargo build --release
+cargo install --path .
+```
+
+**C/CUDA** (from `c/`):
+```
+cd c
+make                    # auto-detects CUDA
+make install PREFIX=~/.local
 ```
 
 ## Usage
@@ -189,10 +218,10 @@ Benchmark: room scene, 4000×3000, 256 samples per pixel, 8 bounces (sequential,
 
 | Implementation | Time | vs Go | Notes |
 |---------------|------|-------|-------|
-| Go (this repo) | 36m39s | 1.0x | vek SIMD for SPD ops |
-| [Rust](https://github.com/westphae/rrelray) | 16m14s | 2.3x | LLVM auto-vectorization |
-| [C](https://github.com/westphae/crelray) (CPU) | 21m07s | 1.7x | GCC `-O3 -march=native -mavx512f` |
-| [C](https://github.com/westphae/crelray) (GPU) | 3m54s | 9.4x | CUDA, float32 SPD, RTX 4070 Ti SUPER |
+| Go (root) | 36m39s | 1.0x | vek SIMD for SPD ops |
+| Rust (`rust/`) | 16m14s | 2.3x | LLVM auto-vectorization + LTO |
+| C (`c/`) CPU | 16m54s | 2.2x | GCC `-O3 -march=native -mavx512f -flto` |
+| C (`c/`) GPU | 3m54s | 9.4x | CUDA, float32 SPD, RTX 4070 Ti SUPER |
 
 All versions use 91 spectral bands (20nm step, 200-2000nm).
 

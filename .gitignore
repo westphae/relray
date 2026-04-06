@@ -1,3 +1,13 @@
+# Go
 /relray
+
+# Rust
+rust/target/
+
+# C
+c/crelray
+c/src/*.o
+
+# Generated artifacts
 *.png
 *.mp4
