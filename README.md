@@ -181,6 +181,21 @@ The renderer produces these effects natively from the physics:
 - **Penrose-Terrell rotation**: A moving sphere still appears spherical (use checker_sphere to see the rotation)
 - **Source Doppler**: Moving objects exhibit their own Doppler shift independent of the observer's motion
 
+## Performance
+
+This project has been implemented in Go, Rust, and C/CUDA. All versions share the same YAML scene file format and produce identical output.
+
+Benchmark: room scene, 4000×3000, 256 samples per pixel, 8 bounces (sequential, exclusive CPU access):
+
+| Implementation | Time | vs Go | Notes |
+|---------------|------|-------|-------|
+| Go (this repo) | 36m39s | 1.0x | vek SIMD for SPD ops |
+| [Rust](https://github.com/westphae/rrelray) | 16m14s | 2.3x | LLVM auto-vectorization |
+| [C](https://github.com/westphae/crelray) (CPU) | 21m07s | 1.7x | GCC `-O3 -march=native -mavx512f` |
+| [C](https://github.com/westphae/crelray) (GPU) | 3m54s | 9.4x | CUDA, float32 SPD, RTX 4070 Ti SUPER |
+
+All versions use 91 spectral bands (20nm step, 200-2000nm).
+
 ## Example scenes
 
 - `scenes/spheres.yaml` — Test scene with colored, mirror, and glass spheres on a checkerboard
