@@ -47,13 +47,15 @@ relray <command> [flags]
 
 **render** — Render a single static image (default if no command given)
 ```
-relray render --file scene.yaml --beta 0.3 --width 1600 --height 1200
-relray render --scene room --beta 0 --out room.png
+relray render --file scene.yaml --width 1600 --height 1200
+relray render --scene room --out room.png
+relray render --file scene.yaml --var 'vx=0.3'
 ```
 
-**sweep** — Render a video sweeping observer velocity from beta-min to beta-max
+**sweep** — Render a video sweeping YAML variables across a range
 ```
-relray sweep --file scene.yaml --beta-min -0.4 --beta-max 0.4 --fps 30
+relray sweep --file scene.yaml --range 'vx:-0.5:0.5' --steps 200 --fps 30
+relray sweep --file scene.yaml --range 'vx:-0.4:0.4' --range 'vy:0.1:-0.1' --steps 100
 ```
 
 **walk** — Render a first-person walk-through video
@@ -67,6 +69,21 @@ Run `relray <command> --help` for all flags.
 
 Scenes are defined in YAML. Use `--file scene.yaml` to load one instead of the built-in scenes (`--scene spheres` or `--scene room`).
 
+### Variables
+
+Any numeric value in a YAML scene can be replaced with a `$variable` placeholder, optionally with a default:
+
+```yaml
+velocity: [$vx:0, 0, 0]       # $vx defaults to 0 if not set
+position: [0, $height, 0]     # $height has no default (must be provided)
+```
+
+Set variables with `--var` on render or `--range` on sweep:
+```
+relray render --file scene.yaml --var 'vx=0.3'
+relray sweep --file scene.yaml --range 'vx:-0.5:0.5' --steps 200
+```
+
 ### Structure
 
 ```yaml
@@ -77,6 +94,7 @@ camera:
   look_at: [0, 0.5, 3]
   up: [0, 1, 0]
   vfov: 70
+  velocity: [0, 0, 0]        # observer velocity as fraction of c (optional)
 
 sky:
   type: gradient           # "gradient", "uniform", or "none"

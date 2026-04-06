@@ -21,7 +21,7 @@ See GOAL.md for the full project vision and README.md for usage and scene file f
 
 ## CLI
 
-Three subcommands: `render` (single image), `sweep` (beta sweep video), `walk` (walk-through video). Use `--file scene.yaml` to load a YAML scene or `--scene spheres|room` for built-ins. Run `relray --help` or `relray <cmd> --help` for flags.
+Three subcommands: `render` (single image), `sweep` (variable sweep video), `walk` (walk-through video). Use `--file scene.yaml` to load a YAML scene or `--scene spheres|room` for built-ins. YAML scenes support `$variable` placeholders (with optional defaults like `$vx:0`) that can be set via `--var 'name=value'` on render or swept via `--range 'name:start:end'` on sweep. Camera velocity is set in the YAML (`camera.velocity`), not via CLI flags. Run `relray --help` or `relray <cmd> --help` for flags.
 
 ## Package Structure
 
