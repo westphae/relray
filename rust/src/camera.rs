@@ -6,7 +6,7 @@ pub struct Camera {
     pub up: Vec3,
     pub vfov: f64,
     pub aspect: f64,
-    pub beta: Vec3,
+    pub velocity: Vec3,
 
     // Computed by init()
     u: Vec3,
@@ -17,9 +17,9 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(position: Vec3, look_at: Vec3, up: Vec3, vfov: f64, aspect: f64, beta: Vec3) -> Self {
+    pub fn new(position: Vec3, look_at: Vec3, up: Vec3, vfov: f64, aspect: f64, velocity: Vec3) -> Self {
         let mut cam = Camera {
-            position, look_at, up, vfov, aspect, beta,
+            position, look_at, up, vfov, aspect, velocity,
             u: Vec3::default(), v: Vec3::default(), w: Vec3::default(),
             half_w: 0.0, half_h: 0.0,
         };

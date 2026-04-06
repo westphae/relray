@@ -96,7 +96,7 @@ pub fn render_frame(cfg: &Config, scene: &Scene, camera: &Camera) -> RgbaImage {
 /// Trace a single pixel at normalized screen coords (u, v).
 fn trace(scene: &Scene, camera: &Camera, max_depth: u32, u: f64, v: f64, rng: &mut SmallRng) -> Spd {
     let dir_obs = camera.ray_dir(u, v);
-    let ab = lorentz::aberrate(dir_obs, camera.beta);
+    let ab = lorentz::aberrate(dir_obs, camera.velocity);
     let dir_world = ab.dir;
     let doppler = ab.doppler;
 

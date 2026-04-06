@@ -125,7 +125,7 @@ uint8_t *render_frame(const RenderConfig *cfg, const Scene *scene, Camera *cam) 
 static Spd trace(const Scene *scene, const Camera *cam, int max_depth,
                  double u, double v, Rng *rng) {
     Vec3 dir_obs = camera_ray_dir(cam, u, v);
-    AberrationResult ab = lorentz_aberrate(dir_obs, cam->beta);
+    AberrationResult ab = lorentz_aberrate(dir_obs, cam->velocity);
 
     Spd spd = trace_world(scene, cam->position, ab.dir, max_depth, rng);
     spd = spd_shift(&spd, 1.0 / ab.doppler);

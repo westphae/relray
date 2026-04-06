@@ -9,7 +9,7 @@ typedef struct {
     Vec3 up;
     double vfov;    // vertical FOV in degrees
     double aspect;  // width / height
-    Vec3 beta;      // velocity as fraction of c
+    Vec3 velocity;  // observer velocity in world frame, fraction of c
 
     // Computed by camera_init()
     Vec3 u, v, w;

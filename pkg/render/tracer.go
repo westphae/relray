@@ -23,7 +23,7 @@ type Tracer struct {
 func (tr *Tracer) Trace(u, v float64) spectrum.SPD {
 	dirObs := tr.Camera.RayDir(u, v)
 
-	ab := lorentz.Aberrate(dirObs, tr.Camera.Beta)
+	ab := lorentz.Aberrate(dirObs, tr.Camera.Velocity)
 
 	spd := tr.traceWorld(tr.Camera.Position, ab.Dir, tr.MaxDepth)
 

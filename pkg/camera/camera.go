@@ -14,9 +14,9 @@ type Camera struct {
 	VFOV     float64 // vertical field of view in degrees
 	Aspect   float64 // width / height
 
-	// Velocity in world frame as fraction of c.
-	// |Beta| must be < 1.
-	Beta vec.Vec3
+	// Velocity of the observer in the world frame, as a fraction of c.
+	// |Velocity| must be < 1.
+	Velocity vec.Vec3
 
 	// Computed basis vectors (call Init before use)
 	u, v, w          vec.Vec3
