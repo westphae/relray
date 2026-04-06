@@ -32,20 +32,15 @@ extern "C" {
 #define GPU_VIS_START 9
 #define GPU_VIS_END 29
 // Ratio of GPU step to host step (for downsampling)
-#define DOWNSAMPLE_RATIO 4  // 20nm / 5nm
+/* CPU and GPU both use 91 bands at 20nm step — no downsampling needed. */
 
 typedef struct { float data[GPU_BANDS]; } GSpd;
 
-// Downsample 361-band host SPD to 91-band GPU SPD (average every 4 bands)
+// Convert CPU SPD (double, 91 bands) to GPU SPD (float, 91 bands).
 __host__ __device__ GSpd gspd_from_spd(const Spd *s) {
     GSpd g;
-    for (int i = 0; i < GPU_BANDS; i++) {
-        int src = i * DOWNSAMPLE_RATIO;
-        float sum = 0;
-        for (int j = 0; j < DOWNSAMPLE_RATIO && src + j < NUM_BANDS; j++)
-            sum += (float)s->data[src + j];
-        g.data[i] = sum / DOWNSAMPLE_RATIO;
-    }
+    for (int i = 0; i < GPU_BANDS; i++)
+        g.data[i] = (float)s->data[i];
     return g;
 }
 
@@ -312,13 +307,106 @@ __device__ GScatterResult dev_scatter(const GpuMaterial *mat, Vec3 in_dir, const
 }
 
 // ============================================================================
-// Scene intersection + aberration + sky
+// Moving objects: trajectory evaluation + retarded-time solver
 // ============================================================================
 
-__device__ int dev_scene_intersect(const Shape *shapes, int n, Vec3 o, Vec3 d, double tmin, double tmax, Hit *h, int *mi) {
-    double cl=tmax;int f=0;
+typedef struct {
+    Shape shape;
+    GpuMaterial material;
+    TrajectoryParams trajectory;
+} GpuMovingObject;
+
+__device__ Vec3 dev_trajectory_eval(const TrajectoryParams *t, double time) {
+    switch (t->type) {
+    case TRAJ_STATIC: return t->static_traj.position;
+    case TRAJ_LINEAR: return dv_add(t->linear.start, dv_scale(t->linear.velocity, time));
+    case TRAJ_ORBIT: {
+        double angle = 2.0 * M_PI * time / t->orbit.period;
+        double c = cos(angle), s = sin(angle);
+        Vec3 cen = t->orbit.center; double r = t->orbit.radius;
+        switch (t->orbit.axis) {
+        case 0: return Vec3{cen.x, cen.y + r*c, cen.z + r*s};
+        case 2: return Vec3{cen.x + r*c, cen.y + r*s, cen.z};
+        default: return Vec3{cen.x + r*c, cen.y, cen.z + r*s};
+        }
+    }}
+    return Vec3{0,0,0};
+}
+
+__device__ Vec3 dev_trajectory_velocity(const TrajectoryParams *t, double time) {
+    switch (t->type) {
+    case TRAJ_STATIC: return Vec3{0,0,0};
+    case TRAJ_LINEAR: return t->linear.velocity;
+    case TRAJ_ORBIT: {
+        double omega = 2.0 * M_PI / t->orbit.period;
+        double angle = omega * time;
+        double c = cos(angle), s = sin(angle);
+        double rw = t->orbit.radius * omega;
+        switch (t->orbit.axis) {
+        case 0: return Vec3{0, -rw*s, rw*c};
+        case 2: return Vec3{-rw*s, rw*c, 0};
+        default: return Vec3{-rw*s, 0, rw*c};
+        }
+    }}
+    return Vec3{0,0,0};
+}
+
+__device__ int dev_retarded_solve(const TrajectoryParams *traj, Vec3 obs_pos,
+                                   double t_obs, double *t_emit_out) {
+    Vec3 pos0 = dev_trajectory_eval(traj, t_obs);
+    double dist0 = dv_length(dv_sub(obs_pos, pos0));
+    double t_emit = t_obs - dist0; /* c = 1 */
+
+    for (int i = 0; i < 50; i++) {
+        Vec3 obj_pos = dev_trajectory_eval(traj, t_emit);
+        Vec3 delta = dv_sub(obs_pos, obj_pos);
+        double dist = dv_length(delta);
+        double td = t_obs - t_emit;
+        double f = dist*dist - td*td;
+        if (fabs(f) < 1e-10) { *t_emit_out = t_emit; return 1; }
+        Vec3 vel = dev_trajectory_velocity(traj, t_emit);
+        double fp = -2.0*dv_dot(delta, vel) + 2.0*td;
+        if (fabs(fp) < 1e-20) break;
+        t_emit -= f / fp;
+        if (t_emit > t_obs) t_emit = t_obs - 1e-6;
+    }
+
+    Vec3 obj_pos = dev_trajectory_eval(traj, t_emit);
+    double dist = dv_length(dv_sub(obs_pos, obj_pos));
+    if (fabs(dist - (t_obs - t_emit)) < 1e-6) { *t_emit_out = t_emit; return 1; }
+    return 0;
+}
+
+// ============================================================================
+// Scene intersection (static + moving objects)
+// ============================================================================
+
+__device__ int dev_scene_intersect(
+    const Shape *shapes, const GpuMaterial *materials, int n,
+    const GpuMovingObject *moving, int nm, double scene_time,
+    Vec3 o, Vec3 d, double tmin, double tmax,
+    Hit *h, const GpuMaterial **out_mat) {
+    double cl=tmax; int f=0;
+
+    /* Static objects */
     for(int i=0;i<n;i++){Hit th;th.source_velocity={0,0,0};
-      if(dev_shape_intersect(&shapes[i],o,d,tmin,cl,&th)){cl=th.t;*h=th;*mi=i;f=1;}}
+      if(dev_shape_intersect(&shapes[i],o,d,tmin,cl,&th)){cl=th.t;*h=th;*out_mat=&materials[i];f=1;}}
+
+    /* Moving objects */
+    for(int i=0;i<nm;i++){
+      double t_ret=0;
+      if(!dev_retarded_solve(&moving[i].trajectory,o,scene_time,&t_ret)) continue;
+      Vec3 obj_pos=dev_trajectory_eval(&moving[i].trajectory,t_ret);
+      Vec3 obj_vel=dev_trajectory_velocity(&moving[i].trajectory,t_ret);
+      Vec3 lo=dv_sub(o,obj_pos);
+      Shape ls=moving[i].shape;
+      if(ls.has_transform) ls.position={0,0,0};
+      Hit th;th.source_velocity={0,0,0};
+      if(dev_shape_intersect(&ls,lo,d,tmin,cl,&th)){
+        th.point=dv_add(th.point,obj_pos);
+        th.source_velocity=obj_vel;
+        cl=th.t;*h=th;*out_mat=&moving[i].material;f=1;}}
+
     return f;
 }
 
@@ -347,6 +435,7 @@ __device__ GSpd dev_sky_eval(const GpuSky *sky, Vec3 dir) {
 
 __device__ void dev_trace_one_sample(
     const Shape *shapes, const GpuMaterial *materials, int num_objects,
+    const GpuMovingObject *moving, int num_moving, double scene_time,
     const Vec3 *light_pos, const GSpd *light_emission, int num_lights,
     const GpuSky *sky,
     Vec3 cam_pos, Vec3 cam_beta, Vec3 cam_u, Vec3 cam_v, Vec3 cam_w,
@@ -369,8 +458,11 @@ __device__ void dev_trace_one_sample(
     Vec3 cur_o = cam_pos, cur_d = ab.dir;
 
     for (int depth = 0; depth < max_depth; depth++) {
-        Hit hit; hit.source_velocity = {0,0,0}; int mi;
-        if (!dev_scene_intersect(shapes, num_objects, cur_o, cur_d, 0.001, 1e12, &hit, &mi)) {
+        Hit hit; hit.source_velocity = {0,0,0};
+        const GpuMaterial *mat = nullptr;
+        if (!dev_scene_intersect(shapes, materials, num_objects,
+                                  moving, num_moving, scene_time,
+                                  cur_o, cur_d, 0.001, 1e12, &hit, &mat)) {
             GSpd sky_spd = dev_sky_eval(sky, cur_d);
             gspd_mul_inplace(&sky_spd, &throughput);
             gspd_add_inplace(&result, &sky_spd);
@@ -383,8 +475,11 @@ __device__ void dev_trace_one_sample(
             Vec3 tl = dv_sub(light_pos[li], hit.point);
             double dist = dv_length(tl);
             Vec3 ld = dv_scale(tl, 1.0/dist);
-            Hit sh; sh.source_velocity={0,0,0}; int sm;
-            if (dev_scene_intersect(shapes, num_objects, hit.point, ld, 0.001, dist-0.001, &sh, &sm)) continue;
+            Hit sh; sh.source_velocity={0,0,0};
+            const GpuMaterial *sm;
+            if (dev_scene_intersect(shapes, materials, num_objects,
+                                     moving, num_moving, scene_time,
+                                     hit.point, ld, 0.001, dist-0.001, &sh, &sm)) continue;
             double ct = dv_dot(hit.normal, ld);
             if (ct <= 0) continue;
             float falloff = (float)(ct / (4.0 * M_PI * dist * dist));
@@ -393,7 +488,19 @@ __device__ void dev_trace_one_sample(
             gspd_add_inplace(&direct, &lc);
         }
 
-        GScatterResult scatter = dev_scatter(&materials[mi], cur_d, &hit, rng);
+        GScatterResult scatter = dev_scatter(mat, cur_d, &hit, rng);
+
+        // Source Doppler for moving objects
+        if (dv_length_sq(hit.source_velocity) > 0) {
+            Vec3 n_photon = dv_normalize(dv_neg(cur_d));
+            Vec3 sv = hit.source_velocity;
+            double gamma = 1.0 / sqrt(1.0 - dv_length_sq(sv));
+            double d_src = 1.0 / (gamma * (1.0 - dv_dot(sv, n_photon)));
+            direct = gspd_shift(&direct, 1.0f / (float)d_src);
+            float sd3 = (float)(d_src * d_src * d_src);
+            gspd_scale_inplace(&direct, sd3);
+        }
+
         gspd_mul_inplace(&direct, &scatter.reflectance);
         gspd_mul_inplace(&direct, &throughput);
         gspd_add_inplace(&result, &direct);
@@ -422,6 +529,7 @@ __global__ void trace_samples_kernel(
     Vec3 cam_pos, Vec3 cam_beta, Vec3 cam_u, Vec3 cam_v, Vec3 cam_w,
     double half_w, double half_h,
     const Shape *shapes, const GpuMaterial *materials, int num_objects,
+    const GpuMovingObject *moving, int num_moving, double scene_time,
     const Vec3 *light_pos, const GSpd *light_emission, int num_lights,
     GpuSky sky)
 {
@@ -438,6 +546,7 @@ __global__ void trace_samples_kernel(
 
     float sx, sy, sz;
     dev_trace_one_sample(shapes, materials, num_objects,
+                         moving, num_moving, scene_time,
                          light_pos, light_emission, num_lights, &sky,
                          cam_pos, cam_beta, cam_u, cam_v, cam_w,
                          half_w, half_h, px, py, width, height, max_depth,
@@ -482,18 +591,12 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
     int width = cfg->width, height = cfg->height, npx = width * height;
     int spp = cfg->samples_per_px;
 
-    // Downsample CIE data to 91 bands (float32)
+    // Convert CIE data to float32 (already 91 bands, matching GPU_BANDS)
     float cie_xf[GPU_BANDS], cie_yf[GPU_BANDS], cie_zf[GPU_BANDS];
     for (int i = 0; i < GPU_BANDS; i++) {
-        int src = i * DOWNSAMPLE_RATIO;
-        float sx=0, sy=0, sz=0;
-        for (int j = 0; j < DOWNSAMPLE_RATIO && src+j < NUM_BANDS; j++) {
-            sx += (float)cie_x[src+j]; sy += (float)cie_y[src+j]; sz += (float)cie_z[src+j];
-        }
-        // Average to match the averaged SPD values
-        cie_xf[i] = sx / DOWNSAMPLE_RATIO;
-        cie_yf[i] = sy / DOWNSAMPLE_RATIO;
-        cie_zf[i] = sz / DOWNSAMPLE_RATIO;
+        cie_xf[i] = (float)cie_x[i];
+        cie_yf[i] = (float)cie_y[i];
+        cie_zf[i] = (float)cie_z[i];
     }
     cudaMemcpyToSymbol(d_cie_x, cie_xf, sizeof(cie_xf));
     cudaMemcpyToSymbol(d_cie_y, cie_yf, sizeof(cie_yf));
@@ -519,6 +622,23 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
     GSpd *h_lemit = (GSpd*)malloc(nl * sizeof(GSpd));
     for (int i = 0; i < nl; i++) { h_lpos[i]=scene->lights[i].position; h_lemit[i]=gspd_from_spd(&scene->lights[i].emission); }
 
+    // Build moving object array
+    int nm = scene->num_moving;
+    GpuMovingObject *h_moving = (GpuMovingObject*)calloc(nm > 0 ? nm : 1, sizeof(GpuMovingObject));
+    for (int i = 0; i < nm; i++) {
+        h_moving[i].shape = scene->moving_objects[i].shape;
+        h_moving[i].trajectory = scene->moving_objects[i].trajectory;
+        Material *m = &scene->moving_objects[i].material;
+        h_moving[i].material.type = m->type;
+        switch (m->type) {
+            case MAT_DIFFUSE: h_moving[i].material.spd1=gspd_from_spd(&m->diffuse.reflectance); break;
+            case MAT_MIRROR:  h_moving[i].material.spd1=gspd_from_spd(&m->mirror.reflectance); break;
+            case MAT_GLASS:   h_moving[i].material.spd1=gspd_from_spd(&m->glass.tint); h_moving[i].material.ior=(float)m->glass.ior; break;
+            case MAT_CHECKER: h_moving[i].material.spd1=gspd_from_spd(&m->checker.even); h_moving[i].material.spd2=gspd_from_spd(&m->checker.odd); h_moving[i].material.scale=(float)m->checker.scale; break;
+            case MAT_CHECKER_SPHERE: h_moving[i].material.spd1=gspd_from_spd(&m->checker_sphere.even); h_moving[i].material.spd2=gspd_from_spd(&m->checker_sphere.odd); h_moving[i].material.num_squares=m->checker_sphere.num_squares; break;
+        }
+    }
+
     GpuSky gpu_sky; memset(&gpu_sky, 0, sizeof(gpu_sky));
     gpu_sky.type = scene->sky.type;
     gpu_sky.top = gspd_from_spd(&scene->sky.top);
@@ -527,9 +647,11 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
 
     // Upload to device
     Shape *d_shapes; GpuMaterial *d_mats; Vec3 *d_lpos; GSpd *d_lemit;
+    GpuMovingObject *d_moving;
     uint8_t *d_pixels; float *d_xyz;
     cudaMalloc(&d_shapes, no * sizeof(Shape));
     cudaMalloc(&d_mats, no * sizeof(GpuMaterial));
+    cudaMalloc(&d_moving, (nm > 0 ? nm : 1) * sizeof(GpuMovingObject));
     cudaMalloc(&d_lpos, nl * sizeof(Vec3));
     cudaMalloc(&d_lemit, nl * sizeof(GSpd));
     cudaMalloc(&d_pixels, npx * 4);
@@ -537,6 +659,7 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
     cudaMemset(d_xyz, 0, npx * 3 * sizeof(float));
     cudaMemcpy(d_shapes, h_shapes, no * sizeof(Shape), cudaMemcpyHostToDevice);
     cudaMemcpy(d_mats, h_mats, no * sizeof(GpuMaterial), cudaMemcpyHostToDevice);
+    if (nm > 0) cudaMemcpy(d_moving, h_moving, nm * sizeof(GpuMovingObject), cudaMemcpyHostToDevice);
     cudaMemcpy(d_lpos, h_lpos, nl * sizeof(Vec3), cudaMemcpyHostToDevice);
     cudaMemcpy(d_lemit, h_lemit, nl * sizeof(GSpd), cudaMemcpyHostToDevice);
 
@@ -547,8 +670,9 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
 
     trace_samples_kernel<<<grid1, block1>>>(
         d_xyz, width, height, spp, cfg->max_depth,
-        cam->position, cam->beta, cam->u, cam->v, cam->w, cam->half_w, cam->half_h,
-        d_shapes, d_mats, no, d_lpos, d_lemit, nl, gpu_sky);
+        cam->position, cam->velocity, cam->u, cam->v, cam->w, cam->half_w, cam->half_h,
+        d_shapes, d_mats, no, d_moving, nm, scene->time,
+        d_lpos, d_lemit, nl, gpu_sky);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) fprintf(stderr, "CUDA launch error: %s\n", cudaGetErrorString(err));
@@ -565,8 +689,9 @@ uint8_t *render_frame_cuda(const RenderConfig *cfg, const Scene *scene, Camera *
     uint8_t *pixels = (uint8_t*)calloc(npx * 4, 1);
     cudaMemcpy(pixels, d_pixels, npx * 4, cudaMemcpyDeviceToHost);
 
-    cudaFree(d_shapes); cudaFree(d_mats); cudaFree(d_lpos); cudaFree(d_lemit);
+    cudaFree(d_shapes); cudaFree(d_mats); cudaFree(d_moving);
+    cudaFree(d_lpos); cudaFree(d_lemit);
     cudaFree(d_pixels); cudaFree(d_xyz);
-    free(h_shapes); free(h_mats); free(h_lpos); free(h_lemit);
+    free(h_shapes); free(h_mats); free(h_moving); free(h_lpos); free(h_lemit);
     return pixels;
 }
