@@ -1,11 +1,11 @@
 name: contraction
 
 camera:
-  position: [0, 1.2, -1]
+  position: [0, 1.2, -2]
   look_at: [0, 1.2, 3]
   up: [0, 1, 0]
   vfov: 60
-  velocity: [0, 0, 0]
+  velocity: [$vx:0, 0, 0]
 
 sky:
   type: gradient
@@ -36,8 +36,8 @@ moving_objects:
         scale: 0.5
     trajectory:
       linear:
-        start: [-0.1, 1.2, 2]
-        velocity: [-0.5, 0, 0]
+        start: [+1.2, 1.2, 2]
+        velocity: [0, 0, 0]
 
   # Checkerboard sphere (right of center in image = negative X)
   - shape: { sphere: { radius: 1.0 } }
@@ -48,5 +48,5 @@ moving_objects:
         num_squares: 8
     trajectory:
       linear:
-        start: [-2.9, 1.2, 2]
-        velocity: [-0.5, 0, 0]
+        start: [-1.2, 1.2, 2]
+        velocity: [0, 0, 0]

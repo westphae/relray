@@ -12,6 +12,7 @@ rayon = "1.10"
 rand = "0.9"
 rand_chacha = "0.9"
 tempfile = "3"
+regex = "1"
 
 [profile.release]
 lto = true

@@ -35,6 +35,7 @@ pub struct CameraDef {
     pub look_at: [f64; 3],
     pub up: [f64; 3],
     pub vfov: f64,
+    pub velocity: Option<[f64; 3]>,
 }
 
 #[derive(Deserialize)]
@@ -212,8 +213,17 @@ pub struct SkyDef {
 // Public API
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub fn load(path: &str) -> Result<(Scene, Option<Camera>), Box<dyn std::error::Error>> {
+    load_with_vars(path, &std::collections::HashMap::new())
+}
+
+pub fn load_with_vars(
+    path: &str,
+    vars: &std::collections::HashMap<String, f64>,
+) -> Result<(Scene, Option<Camera>), Box<dyn std::error::Error>> {
     let data = std::fs::read_to_string(path)?;
+    let data = crate::vars::substitute_vars(&data, vars);
     let sf: SceneFile = serde_yaml::from_str(&data)?;
     convert(&sf)
 }
@@ -274,13 +284,14 @@ fn convert(sf: &SceneFile) -> Result<(Scene, Option<Camera>), Box<dyn std::error
 
     // Camera
     let cam = sf.camera.as_ref().map(|c| {
+        let vel = c.velocity.map(v3).unwrap_or_default();
         Camera::new(
             v3(c.position),
             v3(c.look_at),
             v3(c.up),
             c.vfov,
             1.0, // aspect will be overridden by caller
-            Vec3::default(),
+            vel,
         )
     });
 

@@ -11,6 +11,9 @@ typedef struct {
 } SceneFileResult;
 
 int scenefile_load(const char *path, SceneFileResult *result);
+/* Load with $variable substitution. vars is an array of {name, value} pairs. */
+typedef struct { const char *name; double value; } SceneVar;
+int scenefile_load_with_vars(const char *path, const SceneVar *vars, int num_vars, SceneFileResult *result);
 void scenefile_free(SceneFileResult *result);
 
 #endif

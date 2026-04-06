@@ -9,6 +9,7 @@ mod retarded;
 mod scene;
 mod scenefile;
 mod spectrum;
+mod vars;
 mod vec;
 
 use std::f64::consts::PI;
@@ -40,19 +41,20 @@ struct Cli {
 enum Commands {
     /// Render a single static image
     Render {
-        #[arg(long, default_value_t = 0.0)]
-        beta: f64,
+        /// Set variable: name=value (repeatable)
+        #[arg(long = "var")]
+        vars: Vec<String>,
         #[command(flatten)]
         common: CommonArgs,
     },
-    /// Render a beta sweep video
+    /// Render a video sweeping variables across a range
     Sweep {
-        #[arg(long, default_value_t = -0.5)]
-        beta_min: f64,
-        #[arg(long, default_value_t = 0.5)]
-        beta_max: f64,
-        #[arg(long, default_value_t = 0.001)]
-        beta_step: f64,
+        /// Sweep variable: name:start:end (repeatable)
+        #[arg(long = "range")]
+        ranges: Vec<String>,
+        /// Number of frames
+        #[arg(long, default_value_t = 200)]
+        steps: usize,
         #[arg(long, default_value_t = 30)]
         fps: u32,
         #[command(flatten)]
@@ -99,9 +101,9 @@ impl CommonArgs {
         }
     }
 
-    fn load_scene(&self) -> (Scene, Option<Camera>) {
+    fn load_scene_with_vars(&self, vars: &std::collections::HashMap<String, f64>) -> (Scene, Option<Camera>) {
         if let Some(ref path) = self.file {
-            match scenefile::load(path) {
+            match scenefile::load_with_vars(path, vars) {
                 Ok((sc, cam)) => return (sc, cam),
                 Err(e) => {
                     eprintln!("Error loading scene file: {}", e);
@@ -124,31 +126,25 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Render { beta, common }) => {
-            let (sc, _file_cam) = common.load_scene();
+        Some(Commands::Render { vars: var_flags, common }) => {
+            let vars = parse_var_flags(&var_flags);
+            let (sc, file_cam) = common.load_scene_with_vars(&vars);
             let out = common.out.clone().unwrap_or_else(|| "output.png".into());
-            run_single(&common.config(), &sc, common.width, common.height, beta, &out);
+            let cam = file_cam.unwrap_or_else(|| camera_preset(&sc.name, common.width, common.height));
+            let aspect = common.width as f64 / common.height as f64;
+            let cam = Camera::new(cam.position, cam.look_at, cam.up, cam.vfov, aspect, cam.velocity);
+            run_single(&common.config(), &sc, &cam, &out);
         }
         Some(Commands::Sweep {
-            beta_min,
-            beta_max,
-            beta_step,
+            ranges: range_flags,
+            steps,
             fps,
             common,
         }) => {
-            let (sc, _) = common.load_scene();
+            let file = common.file.clone().expect("sweep requires --file with a YAML scene containing $variables");
+            let ranges = parse_range_flags(&range_flags);
             let out = common.out.clone().unwrap_or_else(|| "sweep.mp4".into());
-            run_sweep(
-                &common.config(),
-                &sc,
-                common.width,
-                common.height,
-                beta_min,
-                beta_max,
-                beta_step,
-                fps,
-                &out,
-            );
+            run_sweep(&common.config(), &file, common.width, common.height, &ranges, steps, fps, &out);
         }
         Some(Commands::Walk {
             duration,
@@ -156,28 +152,18 @@ fn main() {
             fps,
             common,
         }) => {
-            let (mut sc, _) = common.load_scene();
+            let (mut sc, _) = common.load_scene_with_vars(&std::collections::HashMap::new());
             let out = common.out.clone().unwrap_or_else(|| "walk.mp4".into());
-            run_walk(
-                &common.config(),
-                &mut sc,
-                common.width,
-                common.height,
-                duration,
-                speed,
-                fps,
-                &out,
-            );
+            run_walk(&common.config(), &mut sc, common.width, common.height, duration, speed, fps, &out);
         }
         None => {
-            // Default to render subcommand behavior: print help
             eprintln!(
                 "Usage: rrelray <command> [flags]\n\n\
                  Relativistic ray tracer -- renders scenes with physically correct\n\
                  aberration, Doppler shift, and searchlight effects.\n\n\
                  Commands:\n  \
                    render    Render a single static image (default)\n  \
-                   sweep     Render a beta sweep video across a range of velocities\n  \
+                   sweep     Render a video sweeping variables across a range\n  \
                    walk      Render a first-person walk-through video\n\n\
                  Run 'rrelray <command> --help' for command-specific flags."
             );
@@ -189,7 +175,24 @@ fn main() {
 // Camera preset
 // ---------------------------------------------------------------------------
 
-fn camera_preset(scene_name: &str, width: u32, height: u32, beta: f64) -> Camera {
+fn parse_var_flags(flags: &[String]) -> std::collections::HashMap<String, f64> {
+    let mut map = std::collections::HashMap::new();
+    for f in flags {
+        match vars::parse_var(f) {
+            Ok((name, val)) => { map.insert(name, val); }
+            Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        }
+    }
+    map
+}
+
+fn parse_range_flags(flags: &[String]) -> Vec<vars::VarRange> {
+    flags.iter().map(|f| {
+        vars::parse_range(f).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+    }).collect()
+}
+
+fn camera_preset(scene_name: &str, width: u32, height: u32) -> Camera {
     let aspect = width as f64 / height as f64;
     match scene_name {
         "room" => Camera::new(
@@ -198,7 +201,7 @@ fn camera_preset(scene_name: &str, width: u32, height: u32, beta: f64) -> Camera
             Vec3::new(0.0, 1.0, 0.0),
             70.0,
             aspect,
-            Vec3::new(0.0, 0.0, beta),
+            Vec3::default(),
         ),
         _ => Camera::new(
             Vec3::new(0.0, 0.5, -3.0),
@@ -206,7 +209,7 @@ fn camera_preset(scene_name: &str, width: u32, height: u32, beta: f64) -> Camera
             Vec3::new(0.0, 1.0, 0.0),
             60.0,
             aspect,
-            Vec3::new(0.0, 0.0, beta),
+            Vec3::default(),
         ),
     }
 }
@@ -215,15 +218,15 @@ fn camera_preset(scene_name: &str, width: u32, height: u32, beta: f64) -> Camera
 // Run modes
 // ---------------------------------------------------------------------------
 
-fn run_single(cfg: &Config, sc: &Scene, width: u32, height: u32, beta: f64, out_file: &str) {
-    let cam = camera_preset(&sc.name, width, height, beta);
+fn run_single(cfg: &Config, sc: &Scene, cam: &Camera, out_file: &str) {
+    let v = cam.velocity;
     println!(
-        "Rendering {}x{}, beta={:.3}, {} spp, {} bounces",
-        cfg.width, cfg.height, beta, cfg.samples_per_px, cfg.max_depth
+        "Rendering {}x{}, velocity=[{:.3},{:.3},{:.3}], {} spp, {} bounces",
+        cfg.width, cfg.height, v.x, v.y, v.z, cfg.samples_per_px, cfg.max_depth
     );
 
     let start = Instant::now();
-    let img = render_frame(cfg, sc, &cam);
+    let img = render_frame(cfg, sc, cam);
     println!("Rendered in {:?}", start.elapsed());
 
     if let Err(e) = save_png(out_file, &img) {
@@ -235,37 +238,39 @@ fn run_single(cfg: &Config, sc: &Scene, width: u32, height: u32, beta: f64, out_
 
 fn run_sweep(
     cfg: &Config,
-    sc: &Scene,
+    file: &str,
     width: u32,
     height: u32,
-    beta_min: f64,
-    beta_max: f64,
-    beta_step: f64,
+    ranges: &[vars::VarRange],
+    steps: usize,
     fps: u32,
     out_file: &str,
 ) {
-    let num_frames = ((beta_max - beta_min) / beta_step).round() as usize + 1;
+    for r in ranges {
+        println!("  {}: {:.4} → {:.4}", r.name, r.start, r.end);
+    }
     println!(
-        "Beta sweep: {:.3} to {:.3}, step {:.4} ({} frames)",
-        beta_min, beta_max, beta_step, num_frames
-    );
-    println!(
-        "Rendering {}x{}, {} spp, {} bounces, {} fps",
-        cfg.width, cfg.height, cfg.samples_per_px, cfg.max_depth, fps
+        "Sweep: {} steps, {}x{}, {} spp, {} bounces, {} fps",
+        steps, cfg.width, cfg.height, cfg.samples_per_px, cfg.max_depth, fps
     );
 
     let frame_dir = tempfile::tempdir().expect("failed to create temp dir");
+    let aspect = width as f64 / height as f64;
     let total_start = Instant::now();
 
-    for i in 0..num_frames {
-        let mut b = beta_min + (i as f64) * beta_step;
-        if b > beta_max {
-            b = beta_max;
-        }
+    for i in 0..steps {
+        let t = if steps > 1 { i as f64 / (steps - 1) as f64 } else { 0.0 };
+        let var_vals = vars::interpolate_vars(ranges, t);
 
-        let cam = camera_preset(&sc.name, width, height, b);
+        let (sc, file_cam) = match scenefile::load_with_vars(file, &var_vals) {
+            Ok(r) => r,
+            Err(e) => { eprintln!("frame {}: {}", i, e); std::process::exit(1); }
+        };
+        let cam = file_cam.expect("sweep requires a camera defined in the YAML scene file");
+        let cam = Camera::new(cam.position, cam.look_at, cam.up, cam.vfov, aspect, cam.velocity);
+
         let start = Instant::now();
-        let img = render_frame(cfg, sc, &cam);
+        let img = render_frame(cfg, &sc, &cam);
         let elapsed = start.elapsed();
 
         let frame_path = frame_dir.path().join(format!("frame_{:04}.png", i));
@@ -274,13 +279,11 @@ fn run_sweep(
             std::process::exit(1);
         }
 
-        println!(
-            "Frame {}/{} beta={:+.3} {:?}",
-            i + 1,
-            num_frames,
-            b,
-            elapsed
-        );
+        let var_str: String = ranges.iter()
+            .map(|r| format!("  {}={:+.4}", r.name, var_vals[&r.name]))
+            .collect::<Vec<_>>()
+            .join("");
+        println!("Frame {}/{}{}  {:?}", i + 1, steps, var_str, elapsed);
     }
 
     println!("All frames rendered in {:?}", total_start.elapsed());

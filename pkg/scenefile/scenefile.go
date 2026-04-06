@@ -19,10 +19,21 @@ import (
 // Load reads a YAML scene file and returns the scene and optional camera.
 // If the file doesn't define a camera, cam will be nil.
 func Load(path string) (*scene.Scene, *camera.Camera, error) {
+	return LoadWithVars(path, nil)
+}
+
+// LoadWithVars reads a YAML scene file, substitutes $variables with the
+// provided values (or their defaults), then returns the scene and camera.
+func LoadWithVars(path string, vars map[string]float64) (*scene.Scene, *camera.Camera, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading scene file: %w", err)
 	}
+
+	if vars == nil {
+		vars = map[string]float64{}
+	}
+	data = SubstituteVars(data, vars)
 
 	var sf SceneFile
 	if err := yaml.Unmarshal(data, &sf); err != nil {
@@ -99,6 +110,13 @@ func convert(sf *SceneFile) (*scene.Scene, *camera.Camera, error) {
 			LookAt:   v3(c.LookAt),
 			Up:       v3(c.Up),
 			VFOV:     c.VFOV,
+		}
+		if c.Velocity != nil {
+			vel := v3(*c.Velocity)
+			if vel.LengthSq() >= 1.0 {
+				return nil, nil, fmt.Errorf("camera: velocity magnitude %.3f exceeds c", vel.Length())
+			}
+			cam.Velocity = vel
 		}
 	}
 

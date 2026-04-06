@@ -49,21 +49,8 @@ func (cf *commonFlags) config() render.Config {
 }
 
 // loadScene loads from --file if provided, otherwise uses the built-in --scene.
-// Returns the scene and an optional camera (nil if not specified in file).
 func (cf *commonFlags) loadScene() (*scene.Scene, *camera.Camera) {
-	if cf.file != "" {
-		sc, cam, err := scenefile.Load(cf.file)
-		if err != nil {
-			log.Fatalf("loading scene file: %v", err)
-		}
-		return sc, cam
-	}
-	switch cf.sceneName {
-	case "room":
-		return buildRoomScene(), nil
-	default:
-		return buildSpheresScene(), nil
-	}
+	return cf.loadSceneWithVars(nil)
 }
 
 func main() {
@@ -90,38 +77,45 @@ func main() {
 	case "render":
 		fs := flag.NewFlagSet("render", flag.ExitOnError)
 		cf := addCommonFlags(fs)
-		beta := fs.Float64("beta", 0.0, "observer speed as fraction of c (along +Z)")
+		varFlags := fs.StringArray("var", nil, "set variable: name=value (repeatable)")
 		fs.Usage = func() {
 			fmt.Fprintf(os.Stderr, "Usage: relray render [flags]\n\nRender a single static image.\n\nFlags:\n")
 			fs.PrintDefaults()
 		}
 		fs.Parse(os.Args[2:])
 
-		sc, fileCam := cf.loadScene()
+		vars := parseVarFlags(*varFlags)
+		sc, cam := cf.loadSceneWithVars(vars)
 		if cf.out == "" {
 			cf.out = "output.png"
 		}
-		_ = fileCam
-		runSingle(cf.config(), sc, cf.width, cf.height, *beta, cf.out)
+		if cam == nil {
+			cam = cameraPreset(sc.Name, cf.width, cf.height)
+		}
+		cam.Aspect = float64(cf.width) / float64(cf.height)
+		cam.Init()
+		runSingle(cf.config(), sc, cam, cf.out)
 
 	case "sweep":
 		fs := flag.NewFlagSet("sweep", flag.ExitOnError)
 		cf := addCommonFlags(fs)
-		betaMin := fs.Float64("beta-min", -0.5, "starting beta")
-		betaMax := fs.Float64("beta-max", 0.5, "ending beta")
-		betaStep := fs.Float64("beta-step", 0.001, "beta increment per frame")
+		rangeFlags := fs.StringArray("range", nil, "sweep variable: name:start:end (repeatable)")
+		steps := fs.Int("steps", 200, "number of frames")
 		fps := fs.Int("fps", 30, "video framerate")
 		fs.Usage = func() {
-			fmt.Fprintf(os.Stderr, "Usage: relray sweep [flags]\n\nRender a beta sweep video across a range of velocities.\n\nFlags:\n")
+			fmt.Fprintf(os.Stderr, "Usage: relray sweep [flags]\n\nRender a video sweeping variables across a range.\n\nFlags:\n")
 			fs.PrintDefaults()
 		}
 		fs.Parse(os.Args[2:])
 
-		sc, _ := cf.loadScene()
+		if cf.file == "" {
+			log.Fatal("sweep requires --file with a YAML scene containing $variables")
+		}
+		ranges := parseRangeFlags(*rangeFlags)
 		if cf.out == "" {
 			cf.out = "sweep.mp4"
 		}
-		runSweep(cf.config(), sc, cf.width, cf.height, *betaMin, *betaMax, *betaStep, *fps, cf.out)
+		runSweep(cf.config(), cf.file, cf.width, cf.height, ranges, *steps, *fps, cf.out)
 
 	case "walk":
 		fs := flag.NewFlagSet("walk", flag.ExitOnError)
@@ -135,11 +129,11 @@ func main() {
 		}
 		fs.Parse(os.Args[2:])
 
-		sc, _ := cf.loadScene()
+		sc, cam := cf.loadScene()
 		if cf.out == "" {
 			cf.out = "walk.mp4"
 		}
-		runWalk(cf.config(), sc, cf.width, cf.height, *duration, *speed, *fps, cf.out)
+		runWalk(cf.config(), sc, cam, cf.width, cf.height, *duration, *speed, *fps, cf.out)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", subcmd)
@@ -156,7 +150,7 @@ aberration, Doppler shift, and searchlight effects.
 
 Commands:
   render    Render a single static image (default)
-  sweep     Render a beta sweep video across a range of velocities
+  sweep     Render a video sweeping variables across a range
   walk      Render a first-person walk-through video
 
 Common flags (all commands):
@@ -172,8 +166,55 @@ Run 'relray <command> --help' for command-specific flags.
 `)
 }
 
-// CameraPreset returns a default camera for the given scene name.
-func cameraPreset(sceneName string, width, height int, beta float64) *camera.Camera {
+// loadSceneWithVars loads a scene from --file with variable substitution,
+// or falls back to a built-in scene.
+func (cf *commonFlags) loadSceneWithVars(vars map[string]float64) (*scene.Scene, *camera.Camera) {
+	if cf.file != "" {
+		sc, cam, err := scenefile.LoadWithVars(cf.file, vars)
+		if err != nil {
+			log.Fatalf("loading scene file: %v", err)
+		}
+		return sc, cam
+	}
+	switch cf.sceneName {
+	case "room":
+		return buildRoomScene(), nil
+	default:
+		return buildSpheresScene(), nil
+	}
+}
+
+// parseVarFlags parses --var flags into a map.
+func parseVarFlags(flags []string) map[string]float64 {
+	if len(flags) == 0 {
+		return nil
+	}
+	vars := make(map[string]float64, len(flags))
+	for _, f := range flags {
+		name, val, err := scenefile.ParseVar(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+		vars[name] = val
+	}
+	return vars
+}
+
+// parseRangeFlags parses --range flags into VarRange slices.
+func parseRangeFlags(flags []string) []scenefile.VarRange {
+	ranges := make([]scenefile.VarRange, 0, len(flags))
+	for _, f := range flags {
+		r, err := scenefile.ParseRange(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+		ranges = append(ranges, r)
+	}
+	return ranges
+}
+
+// cameraPreset returns a default camera for the given built-in scene name.
+func cameraPreset(sceneName string, width, height int) *camera.Camera {
 	aspect := float64(width) / float64(height)
 	switch sceneName {
 	case "room":
@@ -183,7 +224,6 @@ func cameraPreset(sceneName string, width, height int, beta float64) *camera.Cam
 			Up:       vec.Vec3{Y: 1},
 			VFOV:     70,
 			Aspect:   aspect,
-			Beta:     vec.Vec3{Z: beta},
 		}
 	default:
 		return &camera.Camera{
@@ -192,19 +232,14 @@ func cameraPreset(sceneName string, width, height int, beta float64) *camera.Cam
 			Up:       vec.Vec3{Y: 1},
 			VFOV:     60,
 			Aspect:   aspect,
-			Beta:     vec.Vec3{Z: beta},
 		}
 	}
 }
 
-func runSingle(cfg render.Config, sc *scene.Scene, width, height int, beta float64, outFile string) {
-	if outFile == "" {
-		outFile = "output.png"
-	}
-	cam := cameraPreset(sc.Name, width, height, beta)
-
-	fmt.Printf("Rendering %dx%d, beta=%.3f, %d spp, %d bounces\n",
-		cfg.Width, cfg.Height, beta, cfg.SamplesPerPx, cfg.MaxDepth)
+func runSingle(cfg render.Config, sc *scene.Scene, cam *camera.Camera, outFile string) {
+	v := cam.Velocity
+	fmt.Printf("Rendering %dx%d, velocity=[%.3f,%.3f,%.3f], %d spp, %d bounces\n",
+		cfg.Width, cfg.Height, v.X, v.Y, v.Z, cfg.SamplesPerPx, cfg.MaxDepth)
 
 	start := time.Now()
 	img := render.RenderFrame(cfg, sc, cam)
@@ -216,15 +251,16 @@ func runSingle(cfg render.Config, sc *scene.Scene, width, height int, beta float
 	fmt.Printf("Saved to %s\n", outFile)
 }
 
-func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, betaMax, betaStep float64, fps int, outFile string) {
+func runSweep(cfg render.Config, file string, width, height int, ranges []scenefile.VarRange, steps, fps int, outFile string) {
 	if outFile == "" {
 		outFile = "sweep.mp4"
 	}
 
-	numFrames := int(math.Round((betaMax-betaMin)/betaStep)) + 1
-	fmt.Printf("Beta sweep: %.3f to %.3f, step %.4f (%d frames)\n", betaMin, betaMax, betaStep, numFrames)
-	fmt.Printf("Rendering %dx%d, %d spp, %d bounces, %d fps\n",
-		cfg.Width, cfg.Height, cfg.SamplesPerPx, cfg.MaxDepth, fps)
+	for _, r := range ranges {
+		fmt.Printf("  %s: %.4f → %.4f\n", r.Name, r.Start, r.End)
+	}
+	fmt.Printf("Sweep: %d steps, %dx%d, %d spp, %d bounces, %d fps\n",
+		steps, cfg.Width, cfg.Height, cfg.SamplesPerPx, cfg.MaxDepth, fps)
 
 	frameDir, err := os.MkdirTemp("", "relray-sweep-*")
 	if err != nil {
@@ -232,14 +268,25 @@ func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, be
 	}
 	defer os.RemoveAll(frameDir)
 
-	totalStart := time.Now()
-	for i := range numFrames {
-		b := betaMin + float64(i)*betaStep
-		if b > betaMax {
-			b = betaMax
-		}
+	aspect := float64(width) / float64(height)
 
-		cam := cameraPreset(sc.Name, width, height, b)
+	totalStart := time.Now()
+	for i := range steps {
+		t := 0.0
+		if steps > 1 {
+			t = float64(i) / float64(steps-1)
+		}
+		vars := scenefile.InterpolateVars(ranges, t)
+
+		sc, cam, err := scenefile.LoadWithVars(file, vars)
+		if err != nil {
+			log.Fatalf("frame %d: %v", i, err)
+		}
+		if cam == nil {
+			log.Fatal("sweep requires a camera defined in the YAML scene file")
+		}
+		cam.Aspect = aspect
+		cam.Init()
 
 		start := time.Now()
 		img := render.RenderFrame(cfg, sc, cam)
@@ -250,7 +297,11 @@ func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, be
 			log.Fatal(err)
 		}
 
-		fmt.Printf("Frame %d/%d  beta=%+.3f  %v\n", i+1, numFrames, b, elapsed)
+		varStr := ""
+		for _, r := range ranges {
+			varStr += fmt.Sprintf("  %s=%+.4f", r.Name, vars[r.Name])
+		}
+		fmt.Printf("Frame %d/%d%s  %v\n", i+1, steps, varStr, elapsed)
 	}
 
 	fmt.Printf("All frames rendered in %v\n", time.Since(totalStart))
@@ -263,7 +314,7 @@ func runSweep(cfg render.Config, sc *scene.Scene, width, height int, betaMin, be
 	fmt.Printf("Saved to %s\n", outFile)
 }
 
-func runWalk(cfg render.Config, sc *scene.Scene, width, height int, duration, speed float64, fps int, outFile string) {
+func runWalk(cfg render.Config, sc *scene.Scene, fileCam *camera.Camera, width, height int, duration, speed float64, fps int, outFile string) {
 	if outFile == "" {
 		outFile = "walk.mp4"
 	}
@@ -280,17 +331,18 @@ func runWalk(cfg render.Config, sc *scene.Scene, width, height int, duration, sp
 	}
 	defer os.RemoveAll(frameDir)
 
-	// Camera path: walk along +Z through the room
-	// Start position and look-ahead distance
 	startZ := -2.0
-	eyeY := 1.0 // eye height
+	eyeY := 1.0
+	if fileCam != nil {
+		startZ = fileCam.Position.Z
+		eyeY = fileCam.Position.Y
+	}
 
 	totalStart := time.Now()
 	for i := range numFrames {
 		t := float64(i) * dt
 		z := startZ + speed*t
 
-		// Update scene time for moving objects
 		sc.Time = t
 
 		cam := &camera.Camera{
@@ -299,7 +351,7 @@ func runWalk(cfg render.Config, sc *scene.Scene, width, height int, duration, sp
 			Up:       vec.Vec3{Y: 1},
 			VFOV:     70,
 			Aspect:   float64(width) / float64(height),
-			Beta:     vec.Vec3{Z: speed},
+			Velocity: vec.Vec3{Z: speed},
 		}
 
 		start := time.Now()

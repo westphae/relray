@@ -14,10 +14,11 @@ type SceneFile struct {
 
 // CameraSpec defines the camera.
 type CameraSpec struct {
-	Position [3]float64 `yaml:"position"`
-	LookAt   [3]float64 `yaml:"look_at"`
-	Up       [3]float64 `yaml:"up"`
-	VFOV     float64    `yaml:"vfov"`
+	Position [3]float64  `yaml:"position"`
+	LookAt   [3]float64  `yaml:"look_at"`
+	Up       [3]float64  `yaml:"up"`
+	VFOV     float64     `yaml:"vfov"`
+	Velocity *[3]float64 `yaml:"velocity,omitempty"` // world-frame velocity as fraction of c
 }
 
 // SkySpec defines the sky/environment.

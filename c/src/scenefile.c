@@ -468,18 +468,128 @@ static int parse_sky(yaml_document_t *doc, yaml_node_t *node, SkyParams *out) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Variable substitution                                              */
+/* ------------------------------------------------------------------ */
+
+/* Substitute $name and $name:default tokens in text.
+   Returns a malloc'd string. Caller must free. */
+static char *substitute_vars(const char *text, size_t len,
+                             const SceneVar *vars, int num_vars) {
+    /* Worst case: output is larger than input (unlikely). Allocate generously. */
+    size_t cap = len * 2 + 1;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    size_t oi = 0;
+
+    for (size_t i = 0; i < len; ) {
+        if (text[i] != '$') {
+            if (oi >= cap - 1) { cap *= 2; out = realloc(out, cap); }
+            out[oi++] = text[i++];
+            continue;
+        }
+        /* Found '$', extract variable name */
+        size_t start = i;
+        i++; /* skip '$' */
+        size_t name_start = i;
+        while (i < len && (text[i] == '_' || (text[i] >= 'a' && text[i] <= 'z') ||
+               (text[i] >= 'A' && text[i] <= 'Z') || (i > name_start && text[i] >= '0' && text[i] <= '9')))
+            i++;
+        size_t name_len = i - name_start;
+        if (name_len == 0) {
+            /* Lone '$', copy it */
+            if (oi >= cap - 1) { cap *= 2; out = realloc(out, cap); }
+            out[oi++] = '$';
+            continue;
+        }
+
+        /* Check for :default */
+        char *default_val = NULL;
+        size_t default_start = 0, default_len = 0;
+        if (i < len && text[i] == ':') {
+            default_start = i + 1;
+            size_t j = default_start;
+            /* Consume number: optional sign, digits, optional dot+digits, optional exponent */
+            if (j < len && (text[j] == '+' || text[j] == '-')) j++;
+            while (j < len && text[j] >= '0' && text[j] <= '9') j++;
+            if (j < len && text[j] == '.') { j++; while (j < len && text[j] >= '0' && text[j] <= '9') j++; }
+            if (j < len && (text[j] == 'e' || text[j] == 'E')) {
+                j++;
+                if (j < len && (text[j] == '+' || text[j] == '-')) j++;
+                while (j < len && text[j] >= '0' && text[j] <= '9') j++;
+            }
+            default_len = j - default_start;
+            if (default_len > 0) {
+                default_val = (char *)text + default_start;
+                i = j; /* consume the default */
+            }
+        }
+
+        /* Look up variable */
+        int found = 0;
+        double val = 0;
+        for (int v = 0; v < num_vars; v++) {
+            if (strlen(vars[v].name) == name_len &&
+                strncmp(vars[v].name, text + name_start, name_len) == 0) {
+                val = vars[v].value;
+                found = 1;
+                break;
+            }
+        }
+
+        char buf[64];
+        if (found) {
+            snprintf(buf, sizeof(buf), "%.10g", val);
+        } else if (default_val) {
+            snprintf(buf, sizeof(buf), "%.*s", (int)default_len, default_val);
+        } else {
+            /* No value, no default: copy original text */
+            size_t orig_len = i - start;
+            while (oi + orig_len >= cap) { cap *= 2; out = realloc(out, cap); }
+            memcpy(out + oi, text + start, orig_len);
+            oi += orig_len;
+            continue;
+        }
+        size_t blen = strlen(buf);
+        while (oi + blen >= cap) { cap *= 2; out = realloc(out, cap); }
+        memcpy(out + oi, buf, blen);
+        oi += blen;
+    }
+    out[oi] = '\0';
+    return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* Top-level scene loading                                            */
 /* ------------------------------------------------------------------ */
 
 int scenefile_load(const char *path, SceneFileResult *result) {
+    return scenefile_load_with_vars(path, NULL, 0, result);
+}
+
+int scenefile_load_with_vars(const char *path, const SceneVar *vars, int num_vars,
+                             SceneFileResult *result) {
     memset(result, 0, sizeof(*result));
     result->scene.sky.type = SKY_NONE;
 
+    /* Read file into memory */
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "scenefile: cannot open '%s'\n", path);
         return 0;
     }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *raw = malloc((size_t)fsize + 1);
+    if (!raw) { fclose(f); return 0; }
+    fread(raw, 1, (size_t)fsize, f);
+    raw[fsize] = '\0';
+    fclose(f);
+
+    /* Substitute variables */
+    char *data = substitute_vars(raw, (size_t)fsize, vars, num_vars);
+    free(raw);
+    if (!data) return 0;
 
     yaml_parser_t parser;
     yaml_document_t doc;
@@ -487,17 +597,17 @@ int scenefile_load(const char *path, SceneFileResult *result) {
 
     if (!yaml_parser_initialize(&parser)) {
         fprintf(stderr, "scenefile: failed to initialize YAML parser\n");
-        fclose(f);
+        free(data);
         return 0;
     }
-    yaml_parser_set_input_file(&parser, f);
+    yaml_parser_set_input_string(&parser, (const unsigned char *)data, strlen(data));
 
     if (!yaml_parser_load(&parser, &doc)) {
         fprintf(stderr, "scenefile: YAML parse error: %s (line %zu)\n",
                 parser.problem ? parser.problem : "unknown",
                 parser.problem_mark.line + 1);
         yaml_parser_delete(&parser);
-        fclose(f);
+        free(data);
         return 0;
     }
 
@@ -528,9 +638,12 @@ int scenefile_load(const char *path, SceneFileResult *result) {
         if (pos) read_vec3(&doc, pos, &result->camera.position);
         if (lat) read_vec3(&doc, lat, &result->camera.look_at);
         if (up)  read_vec3(&doc, up, &result->camera.up);
+        yaml_node_t *vel = map_get(&doc, cam_node, "velocity");
+
         result->camera.vfov = vfov ? node_double(&doc, vfov) : 60.0;
         result->camera.aspect = 1.0; /* caller overrides */
-        result->camera.beta = VEC3_ZERO;
+        result->camera.velocity = VEC3_ZERO;
+        if (vel) read_vec3(&doc, vel, &result->camera.velocity);
         result->has_camera = 1;
     }
 
@@ -620,7 +733,7 @@ int scenefile_load(const char *path, SceneFileResult *result) {
 cleanup:
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);
-    fclose(f);
+    free(data);
 
     if (!ok) {
         scenefile_free(result);
