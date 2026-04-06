@@ -6,8 +6,9 @@ use rand::rngs::SmallRng;
 use super::{random_unit_vec, Material, ScatterResult};
 
 /// Lambertian diffuse material with a checkerboard pattern alternating
-/// between two spectral reflectances. The pattern is defined in the XZ
-/// plane (horizontal), with configurable scale.
+/// between two spectral reflectances. The pattern is computed in the
+/// tangent plane of the surface (perpendicular to the hit normal), so it
+/// produces a proper checkerboard on every flat face of any shape.
 pub struct Checker {
     pub even: Spd,
     pub odd: Spd,
@@ -16,11 +17,20 @@ pub struct Checker {
 }
 
 impl Checker {
-    fn reflectance_at(&self, p: Vec3) -> Spd {
+    fn reflectance_at(&self, p: Vec3, n: Vec3) -> Spd {
+        // Build a tangent frame from the surface normal.
+        let reference = if n.x.abs() > 0.9 {
+            Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+        } else {
+            Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+        };
+        let t1 = n.cross(reference).normalize();
+        let t2 = n.cross(t1);
+
         let inv = 1.0 / self.scale;
-        let ix = (p.x * inv).floor() as i64;
-        let iz = (p.z * inv).floor() as i64;
-        if (ix + iz) % 2 == 0 {
+        let iu = (p.dot(t1) * inv).floor() as i64;
+        let iv = (p.dot(t2) * inv).floor() as i64;
+        if (iu + iv) % 2 == 0 {
             self.even
         } else {
             self.odd
@@ -37,7 +47,7 @@ impl Material for Checker {
         ScatterResult {
             scattered: true,
             out_dir: scattered.normalize(),
-            reflectance: self.reflectance_at(hit.point),
+            reflectance: self.reflectance_at(hit.point, hit.normal),
         }
     }
 

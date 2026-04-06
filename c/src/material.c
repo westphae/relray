@@ -90,11 +90,16 @@ static ScatterResult scatter_glass(double ior, const Spd *tint,
 }
 
 static Spd checker_reflectance_at(const Spd *even, const Spd *odd,
-                                  double scale, Vec3 point) {
+                                  double scale, Vec3 point, Vec3 normal) {
+    /* Build a tangent frame from the surface normal. */
+    Vec3 ref = (fabs(normal.x) > 0.9) ? vec3(0, 1, 0) : vec3(1, 0, 0);
+    Vec3 t1 = vec3_normalize(vec3_cross(normal, ref));
+    Vec3 t2 = vec3_cross(normal, t1);
+
     double inv = 1.0 / scale;
-    int ix = (int)floor(point.x * inv);
-    int iz = (int)floor(point.z * inv);
-    return ((ix + iz) % 2 == 0) ? *even : *odd;
+    int iu = (int)floor(vec3_dot(point, t1) * inv);
+    int iv = (int)floor(vec3_dot(point, t2) * inv);
+    return ((iu + iv) % 2 == 0) ? *even : *odd;
 }
 
 static Spd checker_sphere_reflectance_at(const Spd *even, const Spd *odd,
@@ -128,7 +133,7 @@ ScatterResult material_scatter(const Material *mat, Vec3 in_dir,
         Spd refl = checker_reflectance_at(&mat->checker.even,
                                           &mat->checker.odd,
                                           mat->checker.scale,
-                                          hit->point);
+                                          hit->point, hit->normal);
         return scatter_diffuse(&refl, hit, rng);
     }
 

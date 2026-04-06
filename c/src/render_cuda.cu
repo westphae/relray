@@ -295,8 +295,10 @@ __device__ GScatterResult dev_scatter(const GpuMaterial *mat, Vec3 in_dir, const
         sr.out_dir=dv_normalize(dv_add(perp,dv_scale(hit->normal,-sqrt(fabs(1-dv_length_sq(perp))))));}
       sr.reflectance=mat->spd1;break;}
     case MAT_CHECKER:{double inv=1.0/mat->scale;
-      int ix=(int)floor(hit->point.x*inv),iz=(int)floor(hit->point.z*inv);
-      sr.reflectance=((ix+iz)%2==0)?mat->spd1:mat->spd2;
+      Vec3 ref=(fabs(hit->normal.x)>0.9)?Vec3{0,1,0}:Vec3{1,0,0};
+      Vec3 t1=dv_normalize(dv_cross(hit->normal,ref)),t2=dv_cross(hit->normal,t1);
+      int iu=(int)floor(dv_dot(hit->point,t1)*inv),iv=(int)floor(dv_dot(hit->point,t2)*inv);
+      sr.reflectance=((iu+iv)%2==0)?mat->spd1:mat->spd2;
       Vec3 sc=dv_add(hit->normal,dev_random_unit_vec(rng));
       if(dv_length_sq(sc)<1e-12)sc=hit->normal;sr.out_dir=dv_normalize(sc);break;}
     case MAT_CHECKER_SPHERE:{int n=mat->num_squares>0?mat->num_squares:8;
