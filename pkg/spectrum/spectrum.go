@@ -9,14 +9,14 @@ import (
 const (
 	LambdaMin  = 200.0  // nm
 	LambdaMax  = 2000.0 // nm
-	LambdaStep = 5.0    // nm
-	NumBands   = 361    // (2000-200)/5 + 1
+	LambdaStep = 20.0   // nm (was 5nm — 4x fewer bands for performance)
+	NumBands   = 91     // (2000-200)/20 + 1
 
 	// Visible sub-range (for CIE integration — CIE functions are zero outside this)
 	visibleMin  = 380.0
 	visibleMax  = 780.0
-	visibleStart = 36  // band index of 380nm: (380-200)/5
-	visibleEnd   = 116 // band index of 780nm: (780-200)/5
+	visibleStart = 9   // band index of 380nm: (380-200)/20
+	visibleEnd   = 29  // band index of 780nm: (780-200)/20
 )
 
 // SPD represents a spectral power distribution sampled at 5nm intervals from 380nm to 780nm.
