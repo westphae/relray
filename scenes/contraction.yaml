@@ -1,0 +1,51 @@
+name: contraction
+
+camera:
+  position: [0, 1.2, -1]
+  look_at: [0, 1.2, 3]
+  up: [0, 1, 0]
+  vfov: 60
+
+sky:
+  type: gradient
+  top: { blackbody: { temp: 12000, luminance: 0.15 } }
+  bottom: { constant: 0 }
+
+lights:
+  - position: [0, 8, 1]
+    emission: { blackbody: { temp: 5778, luminance: 40 } }
+  - position: [-3, 5, -1]
+    emission: { blackbody: { temp: 6500, luminance: 15 } }
+  - position: [3, 4, -1]
+    emission: { blackbody: { temp: 6500, luminance: 15 } }
+
+objects:
+  # Green floor
+  - shape: { plane: {} }
+    material:
+      diffuse: { rgb: [0.15, 0.4, 0.1] }
+
+moving_objects:
+  # Checkerboard cube (left of center in image = positive X)
+  - shape: { box: { size: [2.0, 2.0, 2.0] } }
+    material:
+      checker:
+        even: { rgb: [0.9, 0.9, 0.9] }
+        odd: { rgb: [0.8, 0.1, 0.1] }
+        scale: 0.5
+    trajectory:
+      linear:
+        start: [-0.1, 1.2, 2]
+        velocity: [-0.5, 0, 0]
+
+  # Checkerboard sphere (right of center in image = negative X)
+  - shape: { sphere: { radius: 1.0 } }
+    material:
+      checker_sphere:
+        even: { rgb: [0.9, 0.9, 0.9] }
+        odd: { rgb: [0.1, 0.1, 0.8] }
+        num_squares: 8
+    trajectory:
+      linear:
+        start: [-2.9, 1.2, 2]
+        velocity: [-0.5, 0, 0]
