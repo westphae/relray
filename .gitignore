@@ -9,5 +9,6 @@ c/crelray
 c/src/*.o
 
 # Generated artifacts
+renders/
 *.png
 *.mp4
